@@ -61,7 +61,12 @@ def test_topic_requires_a_name():
 
 
 def new_exam(**overrides):
-    fields = {"subject_code": "IDATT2202", "label": "Høst 2023", "pdf_key": "exams/h23.pdf"}
+    fields = {
+        "subject_code": "IDATT2202",
+        "label": "Høst 2023",
+        "pdf_key": "exams/h23.pdf",
+        "uploaded_at": NOW,
+    }
     return Exam(**(fields | overrides))
 
 
@@ -121,11 +126,35 @@ def test_error_and_failed_status_must_go_together():
         new_exam(error="boom")
 
 
-def test_exam_requires_label_and_pdf():
+def test_exam_requires_label_pdf_and_an_aware_upload_time():
     with pytest.raises(ValueError):
         new_exam(label=" ")
     with pytest.raises(ValueError):
         new_exam(pdf_key="")
+    with pytest.raises(ValueError):
+        new_exam(uploaded_at=datetime(2026, 11, 11))
+
+
+def test_page_counts_are_unknown_until_pages_are_rendered():
+    exam = new_exam(solution_pdf_key="exams/h23-lf.pdf")
+    assert (exam.page_count, exam.solution_page_count) == (None, None)
+
+    rendered = exam.with_pages(10, 4)
+    assert (rendered.page_count, rendered.solution_page_count) == (10, 4)
+
+
+def test_retrying_forgets_the_page_counts_because_rendering_starts_over():
+    failed = new_exam().with_pages(10).fail("boom")
+    assert failed.retry().page_count is None
+
+
+def test_impossible_page_counts_are_rejected():
+    with pytest.raises(ValueError):
+        new_exam().with_pages(0)
+    with pytest.raises(ValueError):
+        new_exam().with_pages(10, 4)  # no solution PDF
+    with pytest.raises(ValueError):
+        new_exam(solution_pdf_key="exams/h23-lf.pdf").with_pages(10, 0)
 
 
 # --- Task --------------------------------------------------------------------
