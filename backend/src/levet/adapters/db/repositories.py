@@ -1,0 +1,269 @@
+"""SQLAlchemy implementations of the repository ports.
+
+Each repository converts between domain entities and table rows; nothing
+outside this package sees a row.
+"""
+
+from datetime import timedelta
+from uuid import UUID
+
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
+
+from levet.adapters.db.models import (
+    AttemptRow,
+    ExamRow,
+    ReviewStateRow,
+    SubjectRow,
+    TaskRow,
+    TaskTopicRow,
+    TopicRow,
+)
+from levet.domain import (
+    Attempt,
+    Exam,
+    ExamStatus,
+    Grade,
+    ReviewPhase,
+    ReviewState,
+    Subject,
+    Task,
+    Topic,
+)
+
+
+class SqlSubjectRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, subject: Subject) -> None:
+        self._session.merge(
+            SubjectRow(code=subject.code, name=subject.name, exam_date=subject.exam_date)
+        )
+
+    def get(self, code: str) -> Subject | None:
+        row = self._session.get(SubjectRow, code)
+        return None if row is None else _subject(row)
+
+    def list_all(self) -> list[Subject]:
+        rows = self._session.scalars(select(SubjectRow).order_by(SubjectRow.code))
+        return [_subject(row) for row in rows]
+
+    def delete(self, code: str) -> None:
+        self._session.execute(delete(SubjectRow).where(SubjectRow.code == code))
+
+
+class SqlTopicRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, topic: Topic) -> None:
+        self._session.merge(TopicRow(id=topic.id, subject_code=topic.subject_code, name=topic.name))
+
+    def get(self, topic_id: UUID) -> Topic | None:
+        row = self._session.get(TopicRow, topic_id)
+        return None if row is None else _topic(row)
+
+    def list_by_subject(self, subject_code: str) -> list[Topic]:
+        rows = self._session.scalars(
+            select(TopicRow).where(TopicRow.subject_code == subject_code).order_by(TopicRow.name)
+        )
+        return [_topic(row) for row in rows]
+
+
+class SqlExamRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, exam: Exam) -> None:
+        self._session.merge(
+            ExamRow(
+                id=exam.id,
+                subject_code=exam.subject_code,
+                label=exam.label,
+                pdf_key=exam.pdf_key,
+                solution_pdf_key=exam.solution_pdf_key,
+                status=exam.status.value,
+                error=exam.error,
+                page_count=exam.page_count,
+                solution_page_count=exam.solution_page_count,
+                uploaded_at=exam.uploaded_at,
+            )
+        )
+
+    def get(self, exam_id: UUID) -> Exam | None:
+        row = self._session.get(ExamRow, exam_id)
+        return None if row is None else _exam(row)
+
+    def list_all(self, subject_code: str | None = None) -> list[Exam]:
+        query = select(ExamRow).order_by(ExamRow.uploaded_at.desc(), ExamRow.label)
+        if subject_code is not None:
+            query = query.where(ExamRow.subject_code == subject_code)
+        return [_exam(row) for row in self._session.scalars(query)]
+
+    def find_by_label(self, subject_code: str, label: str) -> Exam | None:
+        row = self._session.scalars(
+            select(ExamRow).where(ExamRow.subject_code == subject_code, ExamRow.label == label)
+        ).first()
+        return None if row is None else _exam(row)
+
+    def list_by_status(self, status: ExamStatus) -> list[Exam]:
+        rows = self._session.scalars(
+            select(ExamRow).where(ExamRow.status == status.value).order_by(ExamRow.uploaded_at)
+        )
+        return [_exam(row) for row in rows]
+
+
+class SqlTaskRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, task: Task) -> None:
+        self._session.merge(
+            TaskRow(
+                id=task.id,
+                exam_id=task.exam_id,
+                parent_id=task.parent_id,
+                number=task.number,
+                text=task.text,
+                points=task.points,
+                solution_text=task.solution_text,
+                figure_keys=list(task.figure_keys),
+                source_pages=list(task.source_pages),
+                topic_links=[
+                    TaskTopicRow(task_id=task.id, topic_id=topic_id)
+                    for topic_id in sorted(task.topic_ids, key=str)
+                ],
+            )
+        )
+
+    def get(self, task_id: UUID) -> Task | None:
+        row = self._session.get(TaskRow, task_id)
+        return None if row is None else _task(row)
+
+    def list_by_exam(self, exam_id: UUID) -> list[Task]:
+        rows = self._session.scalars(
+            select(TaskRow).where(TaskRow.exam_id == exam_id).order_by(TaskRow.number)
+        )
+        return [_task(row) for row in rows]
+
+    def delete(self, task_id: UUID) -> None:
+        row = self._session.get(TaskRow, task_id)
+        if row is not None:
+            self._session.delete(row)
+
+
+class SqlAttemptRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, attempt: Attempt) -> None:
+        self._session.add(
+            AttemptRow(
+                id=attempt.id,
+                task_id=attempt.task_id,
+                attempted_at=attempt.attempted_at,
+                grade=attempt.grade.value,
+                time_spent_seconds=(
+                    None if attempt.time_spent is None else attempt.time_spent.total_seconds()
+                ),
+                answer=attempt.answer,
+                note=attempt.note,
+            )
+        )
+        # Flush now so re-adding an existing attempt fails here, not at commit.
+        self._session.flush()
+
+    def list_by_task(self, task_id: UUID) -> list[Attempt]:
+        rows = self._session.scalars(
+            select(AttemptRow)
+            .where(AttemptRow.task_id == task_id)
+            .order_by(AttemptRow.attempted_at)
+        )
+        return [_attempt(row) for row in rows]
+
+
+class SqlReviewStateRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, state: ReviewState) -> None:
+        self._session.merge(
+            ReviewStateRow(
+                task_id=state.task_id,
+                due=state.due,
+                phase=state.phase.value,
+                step=state.step,
+                stability=state.stability,
+                difficulty=state.difficulty,
+                last_review=state.last_review,
+            )
+        )
+
+    def get(self, task_id: UUID) -> ReviewState | None:
+        row = self._session.get(ReviewStateRow, task_id)
+        return None if row is None else _review_state(row)
+
+
+def _subject(row: SubjectRow) -> Subject:
+    return Subject(code=row.code, name=row.name, exam_date=row.exam_date)
+
+
+def _topic(row: TopicRow) -> Topic:
+    return Topic(id=row.id, subject_code=row.subject_code, name=row.name)
+
+
+def _exam(row: ExamRow) -> Exam:
+    return Exam(
+        id=row.id,
+        subject_code=row.subject_code,
+        label=row.label,
+        pdf_key=row.pdf_key,
+        solution_pdf_key=row.solution_pdf_key,
+        status=ExamStatus(row.status),
+        error=row.error,
+        page_count=row.page_count,
+        solution_page_count=row.solution_page_count,
+        uploaded_at=row.uploaded_at,
+    )
+
+
+def _task(row: TaskRow) -> Task:
+    return Task(
+        id=row.id,
+        exam_id=row.exam_id,
+        parent_id=row.parent_id,
+        number=row.number,
+        text=row.text,
+        points=row.points,
+        solution_text=row.solution_text,
+        figure_keys=tuple(row.figure_keys),
+        source_pages=tuple(row.source_pages),
+        topic_ids=frozenset(link.topic_id for link in row.topic_links),
+    )
+
+
+def _attempt(row: AttemptRow) -> Attempt:
+    return Attempt(
+        id=row.id,
+        task_id=row.task_id,
+        attempted_at=row.attempted_at,
+        grade=Grade(row.grade),
+        time_spent=(
+            None if row.time_spent_seconds is None else timedelta(seconds=row.time_spent_seconds)
+        ),
+        answer=row.answer,
+        note=row.note,
+    )
+
+
+def _review_state(row: ReviewStateRow) -> ReviewState:
+    return ReviewState(
+        task_id=row.task_id,
+        due=row.due,
+        phase=ReviewPhase(row.phase),
+        step=row.step,
+        stability=row.stability,
+        difficulty=row.difficulty,
+        last_review=row.last_review,
+    )

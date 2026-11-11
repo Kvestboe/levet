@@ -7,10 +7,18 @@ name = "levet"
 version = "0.1.0"
 description = "Self-hosted exam-practice web app"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "alembic>=1.20",
+    "fastapi>=0.162",
+    "itsdangerous>=2.2",
+    "pymupdf>=2.1",
+    "python-multipart>=0.0.33",
+    "sqlalchemy>=2.1",
+    "uvicorn[standard]>=0.54",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.8"]
+dev = ["httpx2>=2.16", "pytest>=9", "ruff>=0.17"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/levet"]
