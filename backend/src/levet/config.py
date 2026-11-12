@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
+from levet.domain.language import DEFAULT_LANGUAGE, Language
+
 
 class ConfigError(Exception):
     """The environment does not describe a runnable configuration."""
@@ -20,6 +22,8 @@ class Settings:
     LEVET_RENDER_DPI      150       resolution of rendered page images
     LEVET_MAX_UPLOAD_MB   50        largest accepted PDF
     LEVET_SESSION_DAYS    30        how long a login lasts
+    LEVET_LANGUAGE        nb        which version to keep of an exam printed in
+                                    several languages: nb, nn or en
     """
 
     password: str
@@ -28,6 +32,7 @@ class Settings:
     render_dpi: int = 150
     max_upload_bytes: int = 50 * 1024 * 1024
     session_days: int = 30
+    preferred_language: Language = DEFAULT_LANGUAGE
 
     def __post_init__(self) -> None:
         if not self.password:
@@ -48,6 +53,7 @@ class Settings:
             render_dpi=_int(env, "LEVET_RENDER_DPI", 150),
             max_upload_bytes=_int(env, "LEVET_MAX_UPLOAD_MB", 50) * 1024 * 1024,
             session_days=_int(env, "LEVET_SESSION_DAYS", 30),
+            preferred_language=_language(env.get("LEVET_LANGUAGE")),
         )
 
     @property
@@ -71,3 +77,13 @@ def _int(env: Mapping[str, str], name: str, default: int) -> int:
         return int(raw)
     except ValueError as exc:
         raise ConfigError(f"{name} must be a whole number, got {raw!r}") from exc
+
+
+def _language(raw: str | None) -> Language:
+    if raw is None or raw.strip() == "":
+        return DEFAULT_LANGUAGE
+    try:
+        return Language(raw.strip().lower())
+    except ValueError as exc:
+        choices = ", ".join(language.value for language in Language)
+        raise ConfigError(f"LEVET_LANGUAGE must be one of {choices}; got {raw!r}") from exc

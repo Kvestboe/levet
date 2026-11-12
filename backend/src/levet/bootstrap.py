@@ -9,6 +9,7 @@ from sqlalchemy import Engine
 from levet.adapters.db.engine import create_session_factory, create_sqlite_engine
 from levet.adapters.db.migrate import run_migrations
 from levet.adapters.db.unit_of_work import SqlAlchemyUnitOfWork
+from levet.adapters.extraction.layout_extractor import LayoutExtractor
 from levet.adapters.files.local import LocalFileStore
 from levet.adapters.http.auth import LoginThrottle, SessionManager, load_or_create_secret_key
 from levet.adapters.jobs.worker import InMemoryProgress, ThreadedJobQueue
@@ -16,6 +17,7 @@ from levet.adapters.pdf.pymupdf_renderer import PyMuPdfRenderer
 from levet.application.exams import ExamService
 from levet.application.ports import Clock
 from levet.application.processing import ExamProcessor
+from levet.application.review import ReviewService
 from levet.application.subjects import SubjectService
 from levet.config import Settings
 
@@ -32,6 +34,7 @@ class Container:
     engine: Engine
     subjects: SubjectService
     exams: ExamService
+    review: ReviewService
     processor: ExamProcessor
     jobs: ThreadedJobQueue
     sessions: SessionManager
@@ -60,7 +63,15 @@ def build_container(settings: Settings, clock: Clock = utc_now) -> Container:
 
     files = LocalFileStore(settings.files_dir)
     progress = InMemoryProgress()
-    processor = ExamProcessor(uow_factory, files, PyMuPdfRenderer(settings.render_dpi), progress)
+    renderer = PyMuPdfRenderer(settings.render_dpi)
+    processor = ExamProcessor(
+        uow_factory,
+        files,
+        renderer,
+        LayoutExtractor(),
+        progress,
+        preferred_language=settings.preferred_language,
+    )
     jobs = ThreadedJobQueue(processor.process)
 
     secret_key = settings.secret_key or load_or_create_secret_key(settings.secret_key_path)
@@ -70,6 +81,7 @@ def build_container(settings: Settings, clock: Clock = utc_now) -> Container:
         engine=engine,
         subjects=SubjectService(uow_factory),
         exams=ExamService(uow_factory, files, jobs, progress, clock),
+        review=ReviewService(uow_factory, files, renderer),
         processor=processor,
         jobs=jobs,
         sessions=SessionManager(

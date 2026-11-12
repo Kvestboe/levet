@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from levet.adapters.http import routes_auth, routes_exams, routes_subjects
+from levet.adapters.http import routes_auth, routes_exams, routes_review, routes_subjects
 from levet.adapters.http.deps import require_session
 from levet.application.errors import ApplicationError, Conflict, InvalidInput, NotFound
 from levet.bootstrap import Container
@@ -35,6 +35,7 @@ def create_app(container: Container) -> FastAPI:
     protected = APIRouter(dependencies=[Depends(require_session)])
     protected.include_router(routes_subjects.router)
     protected.include_router(routes_exams.router)
+    protected.include_router(routes_review.router)
     api.include_router(protected)
     app.include_router(api)
 

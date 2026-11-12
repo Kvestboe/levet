@@ -298,3 +298,263 @@ def test_sessions_survive_a_restart_because_the_signing_key_is_kept(settings):
     with TestClient(create_app(build_container(settings))) as after:
         after.cookies.set(SESSION_COOKIE, cookie)
         assert after.get("/api/subjects").status_code == 200
+
+
+# --- extraction and review ---------------------------------------------------
+
+
+@pytest.fixture
+def reviewed_exam(client, subject, exam_pdf, solution_pdf):
+    """An uploaded exam with a solution, processed and waiting for review."""
+    exam = upload(client, exam_pdf, solution=solution_pdf).json()
+    processed = wait_until_processed(client, exam["id"])
+    assert processed["status"] == "needs_review", processed["error"]
+    return processed
+
+
+def tasks_of(client, exam):
+    response = client.get(f"/api/exams/{exam['id']}/tasks")
+    assert response.status_code == 200
+    return response.json()
+
+
+def task(client, exam, number):
+    return next(t for t in tasks_of(client, exam)["tasks"] if t["number"] == number)
+
+
+def test_uploaded_exam_is_split_into_tasks_with_images_solutions_and_topics(client, reviewed_exam):
+    body = tasks_of(client, reviewed_exam)
+    tasks = body["tasks"]
+
+    assert [(t["number"], t["title"], t["points"]) for t in tasks] == [
+        ("1", "Normalfordeling", 2),
+        ("1a", None, 1),
+        ("1b", None, 1),
+        ("2", "Hypotesetest", 3),
+    ]
+    assert [t["parent_id"] for t in tasks] == [None, tasks[0]["id"], tasks[0]["id"], None]
+    assert [t["position"] for t in tasks] == [0, 1, 2, 3]
+    assert sorted(t["name"] for t in body["topics"]) == ["Hypotesetest", "Normalfordeling"]
+    assert [[topic["name"] for topic in t["topics"]] for t in tasks] == [
+        ["Normalfordeling"],
+        [],
+        [],
+        ["Hypotesetest"],
+    ]
+
+    # Part b runs over a page break: two images, one region each.
+    part_b = tasks[2]
+    assert [region["page"] for region in part_b["regions"]] == [2, 3]
+    assert len(part_b["images"]) == 2
+    assert all(len(t["images"]) == len(t["regions"]) for t in tasks)
+    assert all(len(t["solution_images"]) == 1 for t in tasks)
+    assert "Var(2X) = 4 Var(X) = 8." in part_b["solution_text"]
+
+    for url in (*part_b["images"], *part_b["solution_images"]):
+        image = client.get(url)
+        assert image.status_code == 200
+        assert image.headers["content-type"] == "image/png"
+        assert image.content.startswith(PNG_SIGNATURE)
+        assert "immutable" in image.headers["cache-control"]
+
+
+def test_task_images_need_a_session_and_a_real_name(client, anonymous, reviewed_exam):
+    url = task(client, reviewed_exam, "1")["images"][0]
+    exam_id = reviewed_exam["id"]
+    assert client.get(f"/api/exams/{exam_id}/task-images/{'0' * 32}.png").status_code == 404
+    assert client.get(f"/api/exams/{exam_id}/task-images/exam.pdf").status_code == 404
+    client.post("/api/auth/logout")
+    assert anonymous.get(url).status_code == 401
+    assert anonymous.get(f"/api/exams/{exam_id}/tasks").status_code == 401
+
+
+def test_a_task_can_be_relabelled_retitled_and_retagged(client, reviewed_exam):
+    first = task(client, reviewed_exam, "1")
+
+    response = client.patch(
+        f"/api/tasks/{first['id']}",
+        json={"number": "1x", "title": "Normalfordelingen", "topics": ["Fordelinger", "Varians"]},
+    )
+    assert response.status_code == 204
+
+    changed = task(client, reviewed_exam, "1x")
+    assert changed["title"] == "Normalfordelingen"
+    assert changed["points"] == 2  # not mentioned, so kept
+    assert [topic["name"] for topic in changed["topics"]] == ["Fordelinger", "Varians"]
+    # "Normalfordeling" is no longer used by any task and is gone.
+    names = [t["name"] for t in tasks_of(client, reviewed_exam)["topics"]]
+    assert names == ["Fordelinger", "Hypotesetest", "Varians"]
+    assert (
+        client.get("/api/subjects/idatt2202/topics").json()
+        == tasks_of(client, reviewed_exam)["topics"]
+    )
+
+    cleared = client.patch(f"/api/tasks/{first['id']}", json={"title": None, "points": None})
+    assert cleared.status_code == 204
+    after = task(client, reviewed_exam, "1x")
+    assert (after["title"], after["points"]) == (None, None)
+
+
+def test_invalid_task_changes_are_rejected(client, reviewed_exam):
+    first = task(client, reviewed_exam, "1")
+    url = f"/api/tasks/{first['id']}"
+    assert client.patch(url, json={"number": " "}).status_code == 422
+    assert client.patch(url, json={"points": -1}).status_code == 422
+    assert client.patch(url, json={"topics": ["A", "B", "C", "D"]}).status_code == 422
+    missing = "/api/tasks/00000000-0000-0000-0000-000000000000"
+    assert client.patch(missing, json={"number": "1"}).status_code == 404
+    assert client.delete(missing).status_code == 404
+
+
+def test_a_task_can_be_split_and_merged_back(client, reviewed_exam):
+    part_a = task(client, reviewed_exam, "1a")
+    original_image = client.get(part_a["images"][0]).content
+
+    split = client.post(
+        f"/api/tasks/{part_a['id']}/split", json={"image_index": 0, "fraction": 0.4}
+    )
+    assert split.status_code == 204
+
+    numbers = [t["number"] for t in tasks_of(client, reviewed_exam)["tasks"]]
+    assert numbers == ["1", "1a", "1b", "1b", "2"]
+    upper, lower = tasks_of(client, reviewed_exam)["tasks"][1:3]
+    assert upper["id"] == part_a["id"]
+    assert lower["parent_id"] == part_a["parent_id"]
+    assert upper["regions"][0]["bottom"] <= lower["regions"][0]["top"]
+    for piece in (upper, lower):
+        image = client.get(piece["images"][0])
+        assert image.status_code == 200
+        assert image.content != original_image
+    assert client.get(part_a["images"][0]).status_code == 404  # the old image is gone
+
+    merged = client.post(f"/api/tasks/{lower['id']}/merge-previous")
+    assert merged.status_code == 204
+    after = tasks_of(client, reviewed_exam)["tasks"]
+    assert [t["number"] for t in after] == ["1", "1a", "1b", "2"]
+    assert len(after[1]["images"]) == 2
+
+
+def test_split_and_merge_report_what_is_wrong(client, reviewed_exam):
+    first = task(client, reviewed_exam, "1")
+    part_a = task(client, reviewed_exam, "1a")
+    assert client.post(f"/api/tasks/{first['id']}/merge-previous").status_code == 409
+    assert (
+        client.post(
+            f"/api/tasks/{part_a['id']}/split", json={"image_index": 5, "fraction": 0.5}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            f"/api/tasks/{part_a['id']}/split", json={"image_index": 0, "fraction": 1.5}
+        ).status_code
+        == 422
+    )
+
+
+def test_deleting_a_task_removes_its_parts_and_images(client, reviewed_exam):
+    first = task(client, reviewed_exam, "1")
+    image = task(client, reviewed_exam, "1a")["images"][0]
+
+    assert client.delete(f"/api/tasks/{first['id']}").status_code == 204
+
+    body = tasks_of(client, reviewed_exam)
+    assert [t["number"] for t in body["tasks"]] == ["2"]
+    assert [t["name"] for t in body["topics"]] == ["Hypotesetest"]
+    assert client.get(image).status_code == 404
+
+
+def test_approving_makes_the_exam_ready_and_closes_it_for_changes(client, reviewed_exam):
+    exam_id = reviewed_exam["id"]
+
+    approved = client.post(f"/api/exams/{exam_id}/approve")
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "ready"
+    assert client.get(f"/api/exams/{exam_id}").json()["status"] == "ready"
+
+    # Parts now carry the topic they took from their task.
+    part = task(client, reviewed_exam, "1a")
+    assert [topic["name"] for topic in part["topics"]] == ["Normalfordeling"]
+
+    assert client.post(f"/api/exams/{exam_id}/approve").status_code == 409
+    assert client.patch(f"/api/tasks/{part['id']}", json={"number": "9"}).status_code == 409
+    assert client.delete(f"/api/tasks/{part['id']}").status_code == 409
+    assert client.get(part["images"][0]).status_code == 200  # still viewable
+
+
+def test_approval_is_refused_while_a_task_has_no_topic(client, reviewed_exam):
+    second = task(client, reviewed_exam, "2")
+    client.patch(f"/api/tasks/{second['id']}", json={"topics": []})
+
+    refused = client.post(f"/api/exams/{reviewed_exam['id']}/approve")
+
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == "These tasks have no topic yet: 2."
+    assert client.get(f"/api/exams/{reviewed_exam['id']}").json()["status"] == "needs_review"
+
+
+def test_a_second_exam_of_the_subject_reuses_the_topics_of_the_first(
+    client, reviewed_exam, build_pdf
+):
+    second_pdf = build_pdf(
+        [
+            ("Oppgave 1: Hypotesetesting", {"bold": True}),
+            "Regn ut p-verdien.",
+            ("Oppgave 2: Normalfordelingen", {"bold": True, "gap": 30}),
+            "Finn sannsynligheten.",
+            ("Oppgave 3: Regresjon", {"bold": True, "gap": 30}),
+            "Tilpass en linje.",
+        ]
+    )
+    second = upload(client, second_pdf, label="Vår 2024").json()
+    assert wait_until_processed(client, second["id"])["status"] == "needs_review"
+
+    body = tasks_of(client, second)
+    assert [[topic["name"] for topic in t["topics"]] for t in body["tasks"]] == [
+        ["Hypotesetest"],
+        ["Normalfordeling"],
+        ["Regresjon"],
+    ]
+    assert [t["name"] for t in body["topics"]] == ["Hypotesetest", "Normalfordeling", "Regresjon"]
+
+
+def test_a_topic_can_be_renamed_and_merged_into_another(client, reviewed_exam):
+    topics = {t["name"]: t["id"] for t in tasks_of(client, reviewed_exam)["topics"]}
+
+    renamed = client.patch(f"/api/topics/{topics['Normalfordeling']}", json={"name": "Fordelinger"})
+    assert renamed.status_code == 200
+    assert renamed.json() == {"id": topics["Normalfordeling"], "name": "Fordelinger"}
+    assert [t["name"] for t in task(client, reviewed_exam, "1")["topics"]] == ["Fordelinger"]
+
+    merged = client.patch(f"/api/topics/{topics['Hypotesetest']}", json={"name": "fordelinger"})
+    assert merged.status_code == 200
+    assert merged.json()["id"] == topics["Normalfordeling"]
+    body = tasks_of(client, reviewed_exam)
+    assert [t["name"] for t in body["topics"]] == ["Fordelinger"]
+    assert [t["name"] for t in task(client, reviewed_exam, "2")["topics"]] == ["Fordelinger"]
+
+    assert (
+        client.patch(f"/api/topics/{topics['Normalfordeling']}", json={"name": " "}).status_code
+        == 422
+    )
+    assert (
+        client.patch(f"/api/topics/{topics['Hypotesetest']}", json={"name": "X"}).status_code == 404
+    )
+
+
+def test_retrying_a_failed_exam_starts_extraction_over(client, subject, exam_pdf, settings):
+    exam = upload(client, BROKEN_PDF).json()
+    assert wait_until_processed(client, exam["id"])["status"] == "failed"
+    assert tasks_of(client, exam)["tasks"] == []
+    assert client.post(f"/api/exams/{exam['id']}/approve").status_code == 409
+
+    # Put a readable PDF where the broken one was, as if the file had been fixed.
+    (settings.files_dir / "exams" / exam["id"] / "exam.pdf").write_bytes(exam_pdf)
+    assert client.post(f"/api/exams/{exam['id']}/retry").status_code == 202
+
+    assert wait_until_processed(client, exam["id"])["status"] == "needs_review"
+    assert [t["number"] for t in tasks_of(client, exam)["tasks"]] == ["1", "1a", "1b", "2"]
+
+
+def test_tasks_of_an_unknown_exam_are_not_found(client):
+    assert client.get("/api/exams/00000000-0000-0000-0000-000000000000/tasks").status_code == 404

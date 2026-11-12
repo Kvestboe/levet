@@ -14,6 +14,7 @@ from levet.domain import (
     Exam,
     ExamStatus,
     Grade,
+    Region,
     ReviewPhase,
     ReviewState,
     Subject,
@@ -212,17 +213,23 @@ def test_exam_labels_are_unique_within_a_subject(uow_factory, now, exam):
 
 def test_task_round_trip_keeps_every_field(uow_factory, exam):
     topics = [Topic(subject_code="IDATT2202", name=name) for name in ("Paging", "Deadlock")]
-    parent = Task(exam_id=exam.id, number="3", text="Gitt følgende tabell …")
+    parent = Task(exam_id=exam.id, number="3", title="Minnehåndtering", position=4)
     child = Task(
         exam_id=exam.id,
         number="3b",
-        text="Vis at $x^2 \\ge 0$.",
+        position=6,
+        text="Vis at x^2 >= 0.",
         parent_id=parent.id,
         points=7.5,
         topic_ids={t.id for t in topics},
-        figure_keys=("exams/x/figures/3b-1.png", "exams/x/figures/3b-2.png"),
+        regions=(
+            Region(page=3, top=0.8, bottom=0.95, left=0.05, right=0.9),
+            Region(page=4, top=0.04, bottom=0.31, left=0.05, right=0.9),
+        ),
+        image_keys=("exams/x/task-images/a.png", "exams/x/task-images/b.png"),
         solution_text="Fordi …",
-        source_pages=(3, 4),
+        solution_regions=(Region(page=2, top=0.1, bottom=0.2),),
+        solution_image_keys=("exams/x/task-images/c.png",),
     )
     with uow_factory() as uow:
         for topic in topics:
@@ -237,10 +244,50 @@ def test_task_round_trip_keeps_every_field(uow_factory, exam):
         assert uow.tasks.list_by_exam(exam.id) == [parent, child]
 
 
+def test_tasks_are_listed_in_document_order_not_by_label(uow_factory, exam):
+    tenth = Task(exam_id=exam.id, number="10", position=1)
+    second = Task(exam_id=exam.id, number="2", position=0)
+    with uow_factory() as uow:
+        uow.tasks.save(tenth)
+        uow.tasks.save(second)
+        uow.commit()
+    with uow_factory() as uow:
+        assert [task.number for task in uow.tasks.list_by_exam(exam.id)] == ["2", "10"]
+
+
+def test_all_tasks_of_an_exam_can_be_deleted_at_once(uow_factory, exam, now):
+    other = save_exam(uow_factory, now, label="Vår 2024")
+    parent = Task(exam_id=exam.id, number="1")
+    with uow_factory() as uow:
+        uow.tasks.save(parent)
+        uow.tasks.save(Task(exam_id=exam.id, number="1a", parent_id=parent.id, position=1))
+        uow.tasks.save(Task(exam_id=other.id, number="1"))
+        uow.commit()
+    with uow_factory() as uow:
+        uow.tasks.delete_by_exam(exam.id)
+        uow.commit()
+    with uow_factory() as uow:
+        assert uow.tasks.list_by_exam(exam.id) == []
+        assert len(uow.tasks.list_by_exam(other.id)) == 1
+
+
+def test_topics_that_no_task_uses_can_be_cleared_out(uow_factory, exam):
+    used = Topic(subject_code="IDATT2202", name="Paging")
+    unused = Topic(subject_code="IDATT2202", name="Deadlock")
+    with uow_factory() as uow:
+        uow.topics.save(used)
+        uow.topics.save(unused)
+        uow.tasks.save(Task(exam_id=exam.id, number="1", topic_ids={used.id}))
+        uow.topics.delete_unused("IDATT2202")
+        uow.commit()
+    with uow_factory() as uow:
+        assert uow.topics.list_by_subject("IDATT2202") == [used]
+
+
 def test_saving_a_task_again_replaces_its_topics(uow_factory, exam):
     old, new = (Topic(subject_code="IDATT2202", name=name) for name in ("Paging", "Deadlock"))
-    task = Task(exam_id=exam.id, number="1", text="…", topic_ids={old.id})
-    retagged = Task(id=task.id, exam_id=exam.id, number="1", text="…", topic_ids={new.id})
+    task = Task(exam_id=exam.id, number="1", topic_ids={old.id})
+    retagged = Task(id=task.id, exam_id=exam.id, number="1", topic_ids={new.id})
     with uow_factory() as uow:
         uow.topics.save(old)
         uow.topics.save(new)

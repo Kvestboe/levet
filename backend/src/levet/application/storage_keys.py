@@ -25,3 +25,12 @@ def solution_pdf(exam_id: UUID) -> str:
 
 def page_image(exam_id: UUID, kind: PageKind, number: int) -> str:
     return f"exams/{exam_id}/pages/{kind.value}-{number:03d}.png"
+
+
+def task_images(exam_id: UUID) -> str:
+    """Prefix under which the images of an exam's tasks and solutions are kept."""
+    return f"exams/{exam_id}/task-images"
+
+
+def task_image(exam_id: UUID, name: str) -> str:
+    return f"{task_images(exam_id)}/{name}"

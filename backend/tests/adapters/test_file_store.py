@@ -38,3 +38,25 @@ def test_keys_that_could_escape_the_store_are_rejected(files, key):
         files.read(key)
     with pytest.raises(ValueError):
         files.exists(key)
+
+
+def test_a_file_can_be_deleted_and_deleting_it_again_is_harmless(files):
+    files.write("exams/abc/task-images/1.png", b"x")
+    files.delete("exams/abc/task-images/1.png")
+    files.delete("exams/abc/task-images/1.png")
+    assert not files.exists("exams/abc/task-images/1.png")
+
+
+def test_deleting_a_tree_removes_everything_under_it_and_nothing_else(files):
+    files.write("exams/abc/task-images/1.png", b"x")
+    files.write("exams/abc/task-images/2.png", b"x")
+    files.write("exams/abc/exam.pdf", b"kept")
+    files.write("exams/other/task-images/1.png", b"kept")
+
+    files.delete_tree("exams/abc/task-images")
+    files.delete_tree("exams/abc/task-images")  # already gone
+
+    assert not files.exists("exams/abc/task-images/1.png")
+    assert not files.exists("exams/abc/task-images/2.png")
+    assert files.read("exams/abc/exam.pdf") == b"kept"
+    assert files.read("exams/other/task-images/1.png") == b"kept"

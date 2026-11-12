@@ -6,6 +6,8 @@ function that depends on time takes ``now`` / ``today`` as an argument.
 
 from levet.domain.attempt import Attempt, Grade
 from levet.domain.exam import Exam, ExamStatus, InvalidTransition
+from levet.domain.language import Language
+from levet.domain.region import Region
 from levet.domain.review import ReviewPhase, ReviewState
 from levet.domain.subject import Subject
 from levet.domain.task import MAX_TOPICS_PER_TASK, Task
@@ -18,6 +20,8 @@ __all__ = [
     "ExamStatus",
     "Grade",
     "InvalidTransition",
+    "Language",
+    "Region",
     "ReviewPhase",
     "ReviewState",
     "Subject",

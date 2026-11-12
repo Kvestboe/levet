@@ -92,11 +92,16 @@ class TaskRow(Base):
         ForeignKey("tasks.id", ondelete="SET NULL", deferrable=True, initially="DEFERRED")
     )
     number: Mapped[str] = mapped_column(String(32))
+    title: Mapped[str | None] = mapped_column(String(300))
+    position: Mapped[int]
     text: Mapped[str] = mapped_column(Text)
     points: Mapped[float | None]
     solution_text: Mapped[str | None] = mapped_column(Text)
-    figure_keys: Mapped[list[str]] = mapped_column(JSON)
-    source_pages: Mapped[list[int]] = mapped_column(JSON)
+    # Regions are stored as lists of [page, top, bottom, left, right].
+    regions: Mapped[list[list[float]]] = mapped_column(JSON)
+    image_keys: Mapped[list[str]] = mapped_column(JSON)
+    solution_regions: Mapped[list[list[float]]] = mapped_column(JSON)
+    solution_image_keys: Mapped[list[str]] = mapped_column(JSON)
 
     topic_links: Mapped[list["TaskTopicRow"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin"

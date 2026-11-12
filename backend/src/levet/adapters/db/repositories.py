@@ -24,6 +24,7 @@ from levet.domain import (
     Exam,
     ExamStatus,
     Grade,
+    Region,
     ReviewPhase,
     ReviewState,
     Subject,
@@ -69,6 +70,17 @@ class SqlTopicRepository:
             select(TopicRow).where(TopicRow.subject_code == subject_code).order_by(TopicRow.name)
         )
         return [_topic(row) for row in rows]
+
+    def delete(self, topic_id: UUID) -> None:
+        self._session.flush()
+        self._session.execute(delete(TopicRow).where(TopicRow.id == topic_id))
+
+    def delete_unused(self, subject_code: str) -> None:
+        self._session.flush()
+        used = select(TaskTopicRow.topic_id)
+        self._session.execute(
+            delete(TopicRow).where(TopicRow.subject_code == subject_code, TopicRow.id.not_in(used))
+        )
 
 
 class SqlExamRepository:
@@ -125,11 +137,15 @@ class SqlTaskRepository:
                 exam_id=task.exam_id,
                 parent_id=task.parent_id,
                 number=task.number,
+                title=task.title,
+                position=task.position,
                 text=task.text,
                 points=task.points,
                 solution_text=task.solution_text,
-                figure_keys=list(task.figure_keys),
-                source_pages=list(task.source_pages),
+                regions=_regions_out(task.regions),
+                image_keys=list(task.image_keys),
+                solution_regions=_regions_out(task.solution_regions),
+                solution_image_keys=list(task.solution_image_keys),
                 topic_links=[
                     TaskTopicRow(task_id=task.id, topic_id=topic_id)
                     for topic_id in sorted(task.topic_ids, key=str)
@@ -143,7 +159,18 @@ class SqlTaskRepository:
 
     def list_by_exam(self, exam_id: UUID) -> list[Task]:
         rows = self._session.scalars(
-            select(TaskRow).where(TaskRow.exam_id == exam_id).order_by(TaskRow.number)
+            select(TaskRow)
+            .where(TaskRow.exam_id == exam_id)
+            .order_by(TaskRow.position, TaskRow.number)
+        )
+        return [_task(row) for row in rows]
+
+    def list_by_topic(self, topic_id: UUID) -> list[Task]:
+        rows = self._session.scalars(
+            select(TaskRow)
+            .join(TaskTopicRow, TaskTopicRow.task_id == TaskRow.id)
+            .where(TaskTopicRow.topic_id == topic_id)
+            .order_by(TaskRow.exam_id, TaskRow.position)
         )
         return [_task(row) for row in rows]
 
@@ -151,6 +178,12 @@ class SqlTaskRepository:
         row = self._session.get(TaskRow, task_id)
         if row is not None:
             self._session.delete(row)
+            self._session.flush()
+
+    def delete_by_exam(self, exam_id: UUID) -> None:
+        for row in self._session.scalars(select(TaskRow).where(TaskRow.exam_id == exam_id)):
+            self._session.delete(row)
+        self._session.flush()
 
 
 class SqlAttemptRepository:
@@ -234,12 +267,27 @@ def _task(row: TaskRow) -> Task:
         exam_id=row.exam_id,
         parent_id=row.parent_id,
         number=row.number,
+        title=row.title,
+        position=row.position,
         text=row.text,
         points=row.points,
         solution_text=row.solution_text,
-        figure_keys=tuple(row.figure_keys),
-        source_pages=tuple(row.source_pages),
+        regions=_regions_in(row.regions),
+        image_keys=tuple(row.image_keys),
+        solution_regions=_regions_in(row.solution_regions),
+        solution_image_keys=tuple(row.solution_image_keys),
         topic_ids=frozenset(link.topic_id for link in row.topic_links),
+    )
+
+
+def _regions_out(regions: tuple[Region, ...]) -> list[list[float]]:
+    return [[r.page, r.top, r.bottom, r.left, r.right] for r in regions]
+
+
+def _regions_in(stored: list[list[float]]) -> tuple[Region, ...]:
+    return tuple(
+        Region(page=int(page), top=top, bottom=bottom, left=left, right=right)
+        for page, top, bottom, left, right in stored
     )
 
 

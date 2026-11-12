@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from levet.config import ConfigError, Settings
+from levet.domain import Language
 
 
 def test_only_the_password_is_required():
@@ -15,6 +16,7 @@ def test_only_the_password_is_required():
     assert settings.render_dpi == 150
     assert settings.max_upload_bytes == 50 * 1024 * 1024
     assert settings.session_days == 30
+    assert settings.preferred_language is Language.BOKMAL
 
 
 def test_everything_can_be_overridden():
@@ -26,6 +28,7 @@ def test_everything_can_be_overridden():
             "LEVET_RENDER_DPI": "200",
             "LEVET_MAX_UPLOAD_MB": "10",
             "LEVET_SESSION_DAYS": "7",
+            "LEVET_LANGUAGE": "EN",
         }
     )
     assert settings.db_path == Path("/srv/levet/levet.db")
@@ -33,6 +36,7 @@ def test_everything_can_be_overridden():
     assert settings.render_dpi == 200
     assert settings.max_upload_bytes == 10 * 1024 * 1024
     assert settings.session_days == 7
+    assert settings.preferred_language is Language.ENGLISH
 
 
 @pytest.mark.parametrize(
@@ -44,6 +48,7 @@ def test_everything_can_be_overridden():
         {"LEVET_PASSWORD": "x", "LEVET_RENDER_DPI": "10"},
         {"LEVET_PASSWORD": "x", "LEVET_MAX_UPLOAD_MB": "0"},
         {"LEVET_PASSWORD": "x", "LEVET_SESSION_DAYS": "-1"},
+        {"LEVET_PASSWORD": "x", "LEVET_LANGUAGE": "german"},
     ],
 )
 def test_unusable_configuration_is_rejected_with_a_config_error(env):

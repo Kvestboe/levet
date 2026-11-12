@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -31,6 +32,12 @@ class LocalFileStore:
 
     def exists(self, key: str) -> bool:
         return self._path(key).is_file()
+
+    def delete(self, key: str) -> None:
+        self._path(key).unlink(missing_ok=True)
+
+    def delete_tree(self, prefix: str) -> None:
+        shutil.rmtree(self._path(prefix), ignore_errors=True)
 
     def _path(self, key: str) -> Path:
         if not _SAFE_KEY.fullmatch(key) or ".." in key.split("/"):

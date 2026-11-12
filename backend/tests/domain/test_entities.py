@@ -10,6 +10,7 @@ from levet.domain import (
     ExamStatus,
     Grade,
     InvalidTransition,
+    Region,
     ReviewPhase,
     ReviewState,
     Subject,
@@ -157,26 +158,70 @@ def test_impossible_page_counts_are_rejected():
         new_exam(solution_pdf_key="exams/h23-lf.pdf").with_pages(10, 0)
 
 
+# --- Region ------------------------------------------------------------------
+
+
+def test_region_covers_the_full_page_width_by_default():
+    region = Region(page=2, top=0.25, bottom=0.75)
+    assert (region.left, region.right) == (0.0, 1.0)
+    assert region.height == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"page": 0, "top": 0.1, "bottom": 0.2},
+        {"page": 1, "top": 0.5, "bottom": 0.5},
+        {"page": 1, "top": 0.6, "bottom": 0.4},
+        {"page": 1, "top": -0.1, "bottom": 0.4},
+        {"page": 1, "top": 0.1, "bottom": 1.1},
+        {"page": 1, "top": 0.1, "bottom": 0.2, "left": 0.9, "right": 0.1},
+    ],
+)
+def test_impossible_regions_are_rejected(fields):
+    with pytest.raises(ValueError):
+        Region(**fields)
+
+
+def test_region_is_split_at_a_fraction_of_its_height():
+    upper, lower = Region(page=3, top=0.2, bottom=0.6, left=0.1, right=0.9).split_at(0.25)
+    assert (upper.top, upper.bottom) == (0.2, pytest.approx(0.3))
+    assert (lower.top, lower.bottom) == (pytest.approx(0.3), 0.6)
+    assert upper.bottom == lower.top
+    for part in (upper, lower):
+        assert (part.page, part.left, part.right) == (3, 0.1, 0.9)
+
+
+@pytest.mark.parametrize("fraction", [0.0, 1.0, -0.2, 1.5])
+def test_region_cannot_be_split_at_or_beyond_its_edges(fraction):
+    with pytest.raises(ValueError):
+        Region(page=1, top=0.2, bottom=0.6).split_at(fraction)
+
+
 # --- Task --------------------------------------------------------------------
 
 
 def new_task(**overrides):
-    fields = {"exam_id": uuid4(), "number": "3b", "text": "Vis at $x^2 \\ge 0$."}
+    fields = {"exam_id": uuid4(), "number": "3b"}
     return Task(**(fields | overrides))
 
 
 def test_task_defaults_describe_a_bare_top_level_task():
     task = new_task()
     assert task.parent_id is None
+    assert task.title is None
+    assert task.text == ""
+    assert task.position == 0
     assert task.points is None
     assert task.topic_ids == frozenset()
-    assert task.figure_keys == ()
-    assert task.solution_text is None
+    assert task.regions == ()
+    assert task.image_keys == ()
     assert task.source_pages == ()
+    assert not task.has_solution
 
 
 def test_sub_task_points_at_its_parent():
-    parent = new_task(number="3", text="Gitt følgende prosesstabell …")
+    parent = new_task(number="3", title="Normalfordeling")
     child = new_task(exam_id=parent.exam_id, number="3a", parent_id=parent.id)
     assert child.parent_id == parent.id
 
@@ -196,17 +241,37 @@ def test_task_accepts_up_to_three_topics_and_no_more():
 
 def test_task_collections_are_stored_immutably():
     topic = uuid4()
-    task = new_task(
-        topic_ids=[topic, topic], figure_keys=["a.png", "b.png"], source_pages=[4, 3, 4]
-    )
+    regions = [Region(page=4, top=0.8, bottom=0.95), Region(page=5, top=0.05, bottom=0.3)]
+    task = new_task(topic_ids=[topic, topic], regions=regions, image_keys=["a.png", "b.png"])
     assert task.topic_ids == frozenset({topic})
-    assert task.figure_keys == ("a.png", "b.png")
-    assert task.source_pages == (3, 4)
+    assert task.regions == tuple(regions)
+    assert task.image_keys == ("a.png", "b.png")
+
+
+def test_source_pages_follow_from_the_regions():
+    task = new_task(
+        regions=[
+            Region(page=5, top=0.05, bottom=0.3),
+            Region(page=4, top=0.8, bottom=0.95),
+            Region(page=4, top=0.1, bottom=0.2),
+        ]
+    )
+    assert task.source_pages == (4, 5)
+
+
+def test_task_has_a_solution_when_it_has_solution_regions_or_text():
+    assert new_task(solution_regions=[Region(page=1, top=0.1, bottom=0.2)]).has_solution
+    assert new_task(solution_text="x = 2").has_solution
+
+
+def test_blank_title_means_no_title():
+    assert new_task(title="   ").title is None
+    assert new_task(title=" Normalfordeling ").title == "Normalfordeling"
 
 
 @pytest.mark.parametrize(
     "overrides",
-    [{"number": " "}, {"points": -1}, {"points": float("nan")}, {"source_pages": [0]}],
+    [{"number": " "}, {"points": -1}, {"points": float("nan")}, {"position": -1}],
 )
 def test_invalid_tasks_are_rejected(overrides):
     with pytest.raises(ValueError):

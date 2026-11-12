@@ -34,3 +34,5 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+# Word lists read better as one split string than as a list of quoted words.
+ignore = ["SIM905"]
