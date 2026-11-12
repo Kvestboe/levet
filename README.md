@@ -5,7 +5,25 @@ tasks and manages what to practise next. The full specification is in
 [SPEC.md](SPEC.md).
 
 The app is being built in milestones. So far: the domain model and scoring,
-the database, login, subjects, and exam upload with page rendering.
+the database, login, subjects, exam upload with page rendering, task
+extraction, and the review screen. Practice comes next.
+
+## How tasks are extracted
+
+Extraction runs locally and costs nothing: no API key, no model, no network.
+The app reads where the text sits on each page, finds task headings
+("Oppgave 3", "Oppg. 3 [15%]", "Problem 3"), sub-task labels ("a)", "b)") and
+Inspera's answer prompts, and cuts each task out of the page as an image. A
+task therefore looks exactly as it did in the exam, formulas and figures
+included. Solutions are cut from the solution PDF the same way and matched to
+tasks by number.
+
+This needs a PDF with real text in it. A scanned exam has none; it comes in
+as one task per page, which can be split by hand in the review screen.
+
+Topics are suggested from task titles and reuse the subject's existing
+topics when the names match. They can be changed per task, and renamed or
+merged for the whole subject, in the review screen.
 
 ## Development
 
@@ -55,6 +73,7 @@ Environment variables read by the backend:
 | `LEVET_RENDER_DPI` | `150` | Resolution of the rendered page images. |
 | `LEVET_MAX_UPLOAD_MB` | `50` | Largest accepted PDF. |
 | `LEVET_SESSION_DAYS` | `30` | How long a login lasts. |
+| `LEVET_LANGUAGE` | `nb` | Which version to keep of an exam printed in several languages: `nb`, `nn` or `en`. English is the fallback. |
 
 Everything the app stores lives in `LEVET_DATA_DIR`.
 
@@ -64,7 +83,7 @@ Everything the app stores lives in `LEVET_DATA_DIR`.
 backend/src/levet/
   domain/        entities and scoring; pure Python, no I/O
   application/   use cases and the ports they depend on
-  adapters/      database, file store, PDF renderer, background worker, HTTP API
+  adapters/      database, file store, PDF renderer, task extractor, background worker, HTTP API
 frontend/src/    React app
 ```
 
