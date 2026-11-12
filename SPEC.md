@@ -100,3 +100,20 @@ Milestones, stop after each for review:
 (1) domain + scoring + tests, (2) DB + upload + page rendering,
 (3) Claude extraction + dedupe + review screen, (4) practice flow + FSRS,
 (5) dashboard + PWA + Docker. Don't add features outside this spec.
+
+## Amendments
+
+### 2026-11-11: extraction must be free to run (replaces the Claude API parts above)
+Decided by the owner: no API key and no paid service for extracting tasks.
+
+- Tasks are found locally from the PDF's layout (headings such as "Oppgave 3",
+  sub-task labels "a)", Inspera's "Velg ett alternativ" prompts, "Maks poeng").
+- A task is shown as an image cut from the original page, not as retyped
+  Markdown/LaTeX: formulas in these exams are drawn as graphics and are not in
+  the PDF's text. The plain text that is there is kept for search and topics.
+- Solutions are cut from the solution PDF the same way and matched by number.
+- Topics are suggested from task titles and reuse the subject's existing topics
+  when the names match; they are confirmed, renamed or merged in review.
+- A PDF in which no tasks can be told apart (for example a scan) becomes one
+  task per page, to be split by hand in the review screen.
+- The preferred language for multi-language exams is set with LEVET_LANGUAGE.
