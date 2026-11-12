@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router'
 import { pageImageUrl } from '../api.ts'
 import type { Exam, PageKind } from '../api.ts'
 import { FailedExam } from '../components/FailedExam.tsx'
+import { ReviewPanel } from '../components/ReviewPanel.tsx'
 import { ErrorMessage, Loading, PageTitle, ProcessingProgress, StatusBadge } from '../components/ui.tsx'
 import { formatDateTime } from '../format.ts'
 import { useExam } from '../queries.ts'
@@ -28,7 +29,12 @@ export function ExamDetailPage() {
   )
 }
 
+type View = 'tasks' | 'pages'
+
 function ExamDetail({ exam }: { exam: Exam }) {
+  const [view, setView] = useState<View>('tasks')
+  const processed = exam.page_count !== null
+
   return (
     <>
       <div className="space-y-1">
@@ -43,7 +49,27 @@ function ExamDetail({ exam }: { exam: Exam }) {
 
       {exam.status === 'processing' && <ProcessingProgress exam={exam} />}
       {exam.status === 'failed' && <FailedExam exam={exam} />}
-      {exam.page_count !== null && <Pages exam={exam} examPages={exam.page_count} />}
+
+      {processed && (
+        <>
+          <Toggle>
+            <ToggleButton active={view === 'tasks'} onClick={() => setView('tasks')}>
+              Tasks
+            </ToggleButton>
+            <ToggleButton active={view === 'pages'} onClick={() => setView('pages')}>
+              Pages
+            </ToggleButton>
+          </Toggle>
+          {view === 'tasks' ? (
+            <ReviewPanel exam={exam} />
+          ) : (
+            // The pages are meant to be read; keep them at a readable width.
+            <div className="mx-auto max-w-3xl">
+              <Pages exam={exam} examPages={exam.page_count ?? 0} />
+            </div>
+          )}
+        </>
+      )}
     </>
   )
 }
@@ -56,14 +82,14 @@ function Pages({ exam, examPages }: { exam: Exam; examPages: number }) {
   return (
     <section className="space-y-4" aria-label="Pages">
       {solutionPages !== null && (
-        <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="group">
-          <KindButton active={kind === 'exam'} onClick={() => setKind('exam')}>
+        <Toggle>
+          <ToggleButton active={kind === 'exam'} onClick={() => setKind('exam')}>
             Exam ({examPages})
-          </KindButton>
-          <KindButton active={kind === 'solution'} onClick={() => setKind('solution')}>
+          </ToggleButton>
+          <ToggleButton active={kind === 'solution'} onClick={() => setKind('solution')}>
             Solution ({solutionPages})
-          </KindButton>
-        </div>
+          </ToggleButton>
+        </Toggle>
       )}
       <ol className="space-y-4">
         {Array.from({ length: count }, (_, index) => index + 1).map((number) => (
@@ -89,7 +115,15 @@ function Pages({ exam, examPages }: { exam: Exam; examPages: number }) {
   )
 }
 
-function KindButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+function Toggle({ children }: { children: ReactNode }) {
+  return (
+    <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="group">
+      {children}
+    </div>
+  )
+}
+
+function ToggleButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"

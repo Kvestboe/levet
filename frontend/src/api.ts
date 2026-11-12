@@ -30,6 +30,50 @@ export type Exam = {
 
 export type PageKind = 'exam' | 'solution'
 
+export type Topic = {
+  id: string
+  name: string
+}
+
+/** A rectangle on a page; the edges are fractions of the page's width and height. */
+export type Region = {
+  page: number
+  top: number
+  bottom: number
+  left: number
+  right: number
+}
+
+export type Task = {
+  id: string
+  exam_id: string
+  parent_id: string | null
+  number: string
+  title: string | null
+  position: number
+  points: number | null
+  /** The task's own topics. A sub-task without any takes its parent's. */
+  topics: Topic[]
+  /** Where on the exam's pages the task is; one image per region, in the same order. */
+  regions: Region[]
+  images: string[]
+  solution_images: string[]
+  solution_text: string | null
+}
+
+export type ExamTasks = {
+  tasks: Task[]
+  topics: Topic[]
+}
+
+/** Fields left out are not changed. */
+export type TaskChanges = {
+  number?: string
+  title?: string | null
+  points?: number | null
+  topics?: string[]
+}
+
 export class ApiError extends Error {
   readonly status: number
 
@@ -114,6 +158,18 @@ export const api = {
     return request<Exam>('/exams', { method: 'POST', body: form })
   },
   retryExam: (id: string) => request<Exam>(`/exams/${id}/retry`, { method: 'POST' }),
+
+  examTasks: (examId: string) => request<ExamTasks>(`/exams/${examId}/tasks`),
+  approveExam: (examId: string) => request<Exam>(`/exams/${examId}/approve`, { method: 'POST' }),
+  updateTask: (taskId: string, changes: TaskChanges) =>
+    request<void>(`/tasks/${taskId}`, json('PATCH', changes)),
+  deleteTask: (taskId: string) => request<void>(`/tasks/${taskId}`, { method: 'DELETE' }),
+  mergeTaskWithPrevious: (taskId: string) =>
+    request<void>(`/tasks/${taskId}/merge-previous`, { method: 'POST' }),
+  renameTopic: (topicId: string, name: string) =>
+    request<Topic>(`/topics/${topicId}`, json('PATCH', { name })),
+  splitTask: (taskId: string, imageIndex: number, fraction: number) =>
+    request<void>(`/tasks/${taskId}/split`, json('POST', { image_index: imageIndex, fraction })),
 }
 
 export function pageImageUrl(examId: string, kind: PageKind, number: number): string {

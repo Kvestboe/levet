@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router'
+import { NavLink, Outlet, useLocation } from 'react-router'
 import { useLogout } from '../queries.ts'
 
 const links = [
@@ -8,10 +8,13 @@ const links = [
 
 export function Layout() {
   const logout = useLogout()
+  // The review screen puts tasks and their page side by side and needs the room.
+  const wide = /^\/exams\/[^/]+$/.test(useLocation().pathname)
+  const width = wide ? 'max-w-6xl' : 'max-w-3xl'
   return (
     <div className="min-h-dvh">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-1 px-4 pt-[env(safe-area-inset-top)]">
+        <div className={`mx-auto flex ${width} items-center gap-1 px-4 pt-[env(safe-area-inset-top)]`}>
           <span className="mr-3 text-lg font-semibold tracking-tight text-indigo-600">levet</span>
           <nav className="flex flex-1 gap-1" aria-label="Main">
             {links.map(({ to, label }) => (
@@ -40,7 +43,7 @@ export function Layout() {
           </button>
         </div>
       </header>
-      <main className="mx-auto max-w-3xl space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+      <main className={`mx-auto ${width} space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]`}>
         <Outlet />
       </main>
     </div>

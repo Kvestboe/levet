@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api.ts'
-import type { Exam } from './api.ts'
+import type { Exam, TaskChanges } from './api.ts'
 
 export const keys = {
   session: ['session'] as const,
   subjects: ['subjects'] as const,
   exams: ['exams'] as const,
   exam: (id: string) => ['exams', id] as const,
+  examTasks: (id: string) => ['exams', id, 'tasks'] as const,
 }
 
 // How often to ask for news while an exam is being processed.
@@ -89,3 +90,61 @@ function useExamMutation<TInput>(mutationFn: (input: TInput) => Promise<Exam>) {
 
 export const useUploadExam = () => useExamMutation(api.uploadExam)
 export const useRetryExam = () => useExamMutation(api.retryExam)
+
+// --- tasks and review ------------------------------------------------------
+
+/** The exam's tasks. Not fetched while the exam is still being processed. */
+export function useExamTasks(exam: Exam) {
+  return useQuery({
+    queryKey: keys.examTasks(exam.id),
+    queryFn: () => api.examTasks(exam.id),
+    enabled: exam.status === 'needs_review' || exam.status === 'ready',
+  })
+}
+
+/** A change to one of an exam's tasks; the task list is fetched again afterwards. */
+function useTaskMutation<TInput>(examId: string, mutationFn: (input: TInput) => Promise<void>) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: keys.examTasks(examId) }),
+  })
+}
+
+export const useUpdateTask = (examId: string) =>
+  useTaskMutation(examId, ({ taskId, changes }: { taskId: string; changes: TaskChanges }) =>
+    api.updateTask(taskId, changes),
+  )
+
+export const useDeleteTask = (examId: string) => useTaskMutation(examId, api.deleteTask)
+
+export const useMergeTask = (examId: string) => useTaskMutation(examId, api.mergeTaskWithPrevious)
+
+export const useSplitTask = (examId: string) =>
+  useTaskMutation(
+    examId,
+    ({ taskId, imageIndex, fraction }: { taskId: string; imageIndex: number; fraction: number }) =>
+      api.splitTask(taskId, imageIndex, fraction),
+  )
+
+/** Renames a topic on every task; renaming it to another topic's name merges the two. */
+export function useRenameTopic() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ topicId, name }: { topicId: string; name: string }) =>
+      api.renameTopic(topicId, name),
+    // A topic belongs to the subject, so every exam's task list may show it.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: keys.exams }),
+  })
+}
+
+export function useApproveExam() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.approveExam,
+    onSuccess: (exam) => {
+      queryClient.setQueryData(keys.exam(exam.id), exam)
+      return queryClient.invalidateQueries({ queryKey: keys.exams })
+    },
+  })
+}

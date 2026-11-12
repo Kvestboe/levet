@@ -84,6 +84,7 @@ export function StatusBadge({ status }: { status: ExamStatus }) {
 
 const stageLabels: Record<string, string> = {
   rendering: 'Rendering pages',
+  extracting: 'Finding tasks',
 }
 
 /** Progress of an exam that is being processed; "Queued" until the worker picks it up. */
