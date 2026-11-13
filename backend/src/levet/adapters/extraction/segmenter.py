@@ -1,10 +1,11 @@
 """Finds tasks in a document from its layout alone. Pure: no PDF library, no I/O.
 
 The input is every line of text with its position, size and weight. The
-output is a list of sections, each a task or sub-task with the bands of the
-pages it occupies. A section runs from its own heading or label to the next
-one, so everything between the first task heading and the end of the last
-task belongs to some section.
+output is a list of sections, one per task ("Oppgave 3"), each with the bands
+of the pages it occupies. A task is kept whole, sub-tasks a), b), c) and all:
+they share an introduction and are practised together. A section runs from
+its heading to the next one, so everything between the first task heading and
+the end of the last task belongs to some section.
 
 What is recognised:
 
@@ -12,8 +13,6 @@ What is recognised:
   "Ekstraoppgave 8: Title" and the like, set in bold, in a larger size or
   alone on their line; and the bare question numbers that Inspera prints in
   the left margin next to a bold title;
-* sub-task labels "a)", "b)" ... at the left edge of the text, in order;
-* in tasks without such labels, one part per "Velg ett alternativ" prompt;
 * "Maks poeng: 5" lines, which end a task and give its points;
 * running headers and footers, which are left out.
 """
@@ -93,7 +92,6 @@ _HEADING = re.compile(
 )
 _MARGIN_INDEX = re.compile(r"^\d{1,3}$")
 _INDEXED_TITLE = re.compile(r"^(?P<index>\d{1,3})\s+(?P<rest>\D.*)$")
-_SUBTASK = re.compile(r"^\(?(?P<letter>[a-z])\)(?:\s|$)")
 _POINTS_LINE = re.compile(
     r"^(?:maks(?:imal)?\.?\s*poeng|max(?:imum)?\.?\s*(?:points|marks|score))"
     r"\s*:?\s*(?P<points>\d+(?:[.,]\d+)?)",
@@ -102,15 +100,10 @@ _POINTS_LINE = re.compile(
 _POINTS_IN_TITLE = re.compile(
     r"[\[(]\s*(?P<points>\d+(?:[.,]\d+)?)\s*(?:%|poeng|points|pts|p)\s*[\])]", re.IGNORECASE
 )
-_PROMPT = re.compile(
-    r"^(?:velg|vel)\s+(?:ett|eitt|et|en|ein)\b.*alternativ|^select\s+(?:one|an)\b.*alternative",
-    re.IGNORECASE,
-)
-
 # Fractions of the page height in which running headers and footers are looked for.
 _HEADER_ZONE = 0.06
 _FOOTER_ZONE = 0.08
-_PAD = 4.0  # points of air kept above a heading or label when cutting
+_PAD = 4.0  # points of air kept above a heading when cutting
 _MIN_BAND = 3.0  # points; thinner bands are dropped
 
 
@@ -123,10 +116,7 @@ def segment(pages: list[PageSize], lines: list[Line]) -> list[ExtractedSection]:
     if not tasks:
         return _one_section_per_page(layout)
 
-    sections: list[ExtractedSection] = []
-    for task in tasks:
-        sections.extend(_sections_of(task, layout))
-    return sections
+    return [_section(task, layout) for task in tasks]
 
 
 # --- layout: rows, margins and what counts as body text ----------------------
@@ -187,9 +177,6 @@ class _Layout:
 
     def content_bottom(self, page: int) -> float:
         return self.bottom * self.height(page)
-
-    def at_body_left(self, row: _Row) -> bool:
-        return row.x0 <= self.body_left + 0.02 * self.pages[row.page - 1].width
 
 
 def _in_header(line: Line, pages: list[PageSize]) -> bool:
@@ -378,104 +365,16 @@ def _cut_above(row: _Row, layout: _Layout, index: int) -> _Cut:
     return _Cut(row.page, max(limit, row.y0 - _PAD))
 
 
-# --- sections within a task --------------------------------------------------
+# --- sections ------------------------------------------------------------------
 
 
-def _sections_of(task: _TaskSpan, layout: _Layout) -> list[ExtractedSection]:
-    starts = _lettered_parts(task, layout) or _prompted_parts(task, layout)
-    number = str(task.number)
-    if not starts:
-        return [_section(number, None, task, task.start, task.end, layout)]
-
-    share = None if task.points is None else task.points / len(starts)
-    sections = [_section(number, None, task, task.start, starts[0][1], layout)]
-    for position, (letter, start) in enumerate(starts):
-        end = starts[position + 1][1] if position + 1 < len(starts) else task.end
-        sections.append(
-            _section(f"{number}{letter}", number, task, start, end, layout, points=share)
-        )
-    return sections
-
-
-def _lettered_parts(task: _TaskSpan, layout: _Layout) -> list[tuple[str, _Cut]]:
-    """Starts of the parts labelled "a)", "b)" ... in alphabetical order."""
-    parts: list[tuple[str, _Cut]] = []
-    for row in task.rows[1:]:
-        match = _SUBTASK.match(row.lines[0].text)
-        if not match or not layout.at_body_left(row):
-            continue
-        letter = match.group("letter")
-        expected_first = not parts and letter in "ab"
-        follows = bool(parts) and parts[-1][0] < letter <= chr(ord(parts[-1][0]) + 2)
-        if expected_first or follows:
-            parts.append((letter, _cut_above(row, layout, layout.rows.index(row))))
-    return parts
-
-
-def _prompted_parts(task: _TaskSpan, layout: _Layout) -> list[tuple[str, _Cut]]:
-    """Starts of unlabelled parts, one per answer prompt, lettered in order.
-
-    Each part after the first begins at the first line of running text below
-    the previous prompt (its answer options are indented, so they are skipped).
-    The first part begins at the paragraph directly above its prompt; what
-    comes before is the introduction shared by all parts.
-    """
-    rows = task.rows[1:]
-    prompts = [index for index, row in enumerate(rows) if _PROMPT.match(row.text)]
-    if len(prompts) < 2:
-        return []
-
-    starts: list[_Row] = []
-    first = prompts[0]
-    while (
-        first > 0
-        and layout.at_body_left(rows[first - 1])
-        and rows[first - 1].page == rows[first].page
-        and rows[first].y0 - rows[first - 1].y1 <= 0.6 * (rows[first].y1 - rows[first].y0)
-    ):
-        first -= 1
-    starts.append(rows[first])
-
-    for previous, current in zip(prompts, prompts[1:], strict=False):
-        opening = next(
-            (
-                row
-                for row in rows[previous + 1 : current + 1]
-                if layout.at_body_left(row) and row is not rows[previous]
-            ),
-            None,
-        )
-        if opening is not None and opening is not rows[current]:
-            starts.append(opening)
-        elif opening is rows[current]:
-            starts.append(rows[current])
-
-    return [
-        (chr(ord("a") + position), _cut_above(row, layout, layout.rows.index(row)))
-        for position, row in enumerate(starts)
-    ]
-
-
-def _section(
-    number: str,
-    parent: str | None,
-    task: _TaskSpan,
-    start: _Cut,
-    end: _Cut,
-    layout: _Layout,
-    points: float | None = None,
-) -> ExtractedSection:
-    regions = _bands(start, end, layout)
-    rows = [
-        row for row in task.rows if start.key <= (row.page, row.y0 + 0.01) and row.key < end.key
-    ]
+def _section(task: _TaskSpan, layout: _Layout) -> ExtractedSection:
     return ExtractedSection(
-        number=number,
-        parent_number=parent,
-        title=task.title if parent is None else None,
-        points=task.points if parent is None else points,
-        regions=regions,
-        text="\n".join(row.text for row in rows),
+        number=str(task.number),
+        title=task.title,
+        points=task.points,
+        regions=_bands(task.start, task.end, layout),
+        text="\n".join(row.text for row in task.rows),
     )
 
 

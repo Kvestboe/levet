@@ -326,31 +326,29 @@ def test_uploaded_exam_is_split_into_tasks_with_images_solutions_and_topics(clie
     body = tasks_of(client, reviewed_exam)
     tasks = body["tasks"]
 
+    # Each Oppgave is one task, its parts a) and b) included.
     assert [(t["number"], t["title"], t["points"]) for t in tasks] == [
         ("1", "Normalfordeling", 2),
-        ("1a", None, 1),
-        ("1b", None, 1),
         ("2", "Hypotesetest", 3),
     ]
-    assert [t["parent_id"] for t in tasks] == [None, tasks[0]["id"], tasks[0]["id"], None]
-    assert [t["position"] for t in tasks] == [0, 1, 2, 3]
+    assert [t["parent_id"] for t in tasks] == [None, None]
+    assert [t["position"] for t in tasks] == [0, 1]
     assert sorted(t["name"] for t in body["topics"]) == ["Hypotesetest", "Normalfordeling"]
     assert [[topic["name"] for topic in t["topics"]] for t in tasks] == [
         ["Normalfordeling"],
-        [],
-        [],
         ["Hypotesetest"],
     ]
 
-    # Part b runs over a page break: two images, one region each.
-    part_b = tasks[2]
-    assert [region["page"] for region in part_b["regions"]] == [2, 3]
-    assert len(part_b["images"]) == 2
+    # Task 1 runs over a page break: two images, one region each.
+    first = tasks[0]
+    assert [region["page"] for region in first["regions"]] == [2, 3]
+    assert len(first["images"]) == 2
     assert all(len(t["images"]) == len(t["regions"]) for t in tasks)
     assert all(len(t["solution_images"]) == 1 for t in tasks)
-    assert "Var(2X) = 4 Var(X) = 8." in part_b["solution_text"]
+    assert "Standardiserer" in first["solution_text"]
+    assert "Var(2X) = 4 Var(X) = 8." in first["solution_text"]
 
-    for url in (*part_b["images"], *part_b["solution_images"]):
+    for url in (*first["images"], *first["solution_images"]):
         image = client.get(url)
         assert image.status_code == 200
         assert image.headers["content-type"] == "image/png"
@@ -407,36 +405,35 @@ def test_invalid_task_changes_are_rejected(client, reviewed_exam):
 
 
 def test_a_task_can_be_split_and_merged_back(client, reviewed_exam):
-    part_a = task(client, reviewed_exam, "1a")
-    original_image = client.get(part_a["images"][0]).content
+    first = task(client, reviewed_exam, "1")
+    original_image = client.get(first["images"][0]).content
 
-    split = client.post(
-        f"/api/tasks/{part_a['id']}/split", json={"image_index": 0, "fraction": 0.4}
-    )
+    split = client.post(f"/api/tasks/{first['id']}/split", json={"image_index": 0, "fraction": 0.4})
     assert split.status_code == 204
 
     numbers = [t["number"] for t in tasks_of(client, reviewed_exam)["tasks"]]
-    assert numbers == ["1", "1a", "1b", "1b", "2"]
-    upper, lower = tasks_of(client, reviewed_exam)["tasks"][1:3]
-    assert upper["id"] == part_a["id"]
-    assert lower["parent_id"] == part_a["parent_id"]
+    assert numbers == ["1", "2", "2"]  # the new piece's label is only a suggestion
+    upper, lower = tasks_of(client, reviewed_exam)["tasks"][0:2]
+    assert upper["id"] == first["id"]
+    assert lower["parent_id"] is None
     assert upper["regions"][0]["bottom"] <= lower["regions"][0]["top"]
+    assert len(lower["images"]) == 2  # the rest of page 2, and page 3
     for piece in (upper, lower):
         image = client.get(piece["images"][0])
         assert image.status_code == 200
         assert image.content != original_image
-    assert client.get(part_a["images"][0]).status_code == 404  # the old image is gone
+    assert client.get(first["images"][0]).status_code == 404  # the old image is gone
 
     merged = client.post(f"/api/tasks/{lower['id']}/merge-previous")
     assert merged.status_code == 204
     after = tasks_of(client, reviewed_exam)["tasks"]
-    assert [t["number"] for t in after] == ["1", "1a", "1b", "2"]
-    assert len(after[1]["images"]) == 2
+    assert [t["number"] for t in after] == ["1", "2"]
+    assert len(after[0]["images"]) == 3
 
 
 def test_split_and_merge_report_what_is_wrong(client, reviewed_exam):
     first = task(client, reviewed_exam, "1")
-    part_a = task(client, reviewed_exam, "1a")
+    part_a = first
     assert client.post(f"/api/tasks/{first['id']}/merge-previous").status_code == 409
     assert (
         client.post(
@@ -452,9 +449,9 @@ def test_split_and_merge_report_what_is_wrong(client, reviewed_exam):
     )
 
 
-def test_deleting_a_task_removes_its_parts_and_images(client, reviewed_exam):
+def test_deleting_a_task_removes_it_and_its_images(client, reviewed_exam):
     first = task(client, reviewed_exam, "1")
-    image = task(client, reviewed_exam, "1a")["images"][0]
+    image = first["images"][1]
 
     assert client.delete(f"/api/tasks/{first['id']}").status_code == 204
 
@@ -472,8 +469,7 @@ def test_approving_makes_the_exam_ready_and_closes_it_for_changes(client, review
     assert approved.json()["status"] == "ready"
     assert client.get(f"/api/exams/{exam_id}").json()["status"] == "ready"
 
-    # Parts now carry the topic they took from their task.
-    part = task(client, reviewed_exam, "1a")
+    part = task(client, reviewed_exam, "1")
     assert [topic["name"] for topic in part["topics"]] == ["Normalfordeling"]
 
     assert client.post(f"/api/exams/{exam_id}/approve").status_code == 409
@@ -553,7 +549,7 @@ def test_retrying_a_failed_exam_starts_extraction_over(client, subject, exam_pdf
     assert client.post(f"/api/exams/{exam['id']}/retry").status_code == 202
 
     assert wait_until_processed(client, exam["id"])["status"] == "needs_review"
-    assert [t["number"] for t in tasks_of(client, exam)["tasks"]] == ["1", "1a", "1b", "2"]
+    assert [t["number"] for t in tasks_of(client, exam)["tasks"]] == ["1", "2"]
 
 
 def test_tasks_of_an_unknown_exam_are_not_found(client):
@@ -581,40 +577,37 @@ def test_nothing_is_queued_until_an_exam_is_approved(client, reviewed_exam):
     assert client.get(f"/api/practice/exams/{reviewed_exam['id']}/tasks").status_code == 409
 
 
-def test_the_queue_serves_tasks_with_context_solution_and_topics(client, approved_exam):
+def test_the_queue_serves_whole_tasks_with_solution_and_topics(client, approved_exam):
     queue = practice_queue(client)
 
-    assert (queue["total"], queue["due_count"]) == (3, 0)
+    assert (queue["total"], queue["due_count"]) == (2, 0)
     assert [(e["task"]["number"], e["reason"]) for e in queue["entries"]] == [
-        ("1a", "new"),
-        ("1b", "new"),
+        ("1", "new"),
         ("2", "new"),
     ]
-    part = queue["entries"][0]["task"]
-    assert part["title"] == "Normalfordeling"  # taken from the task it is part of
-    assert part["exam"] == {
+    first = queue["entries"][0]["task"]
+    assert first["title"] == "Normalfordeling"
+    assert first["exam"] == {
         "id": approved_exam["id"],
         "label": "Høst 2023",
         "subject_code": "IDATT2202",
     }
-    assert part["context"]["number"] == "1"
-    assert [member["number"] for member in part["group"]] == ["1", "1a", "1b"]
-    assert [topic["name"] for topic in part["topics"]] == ["Normalfordeling"]
+    assert first["context"] is None
+    assert [member["number"] for member in first["group"]] == ["1"]
+    assert len(first["images"]) == 2  # the whole task, over two pages
+    assert [topic["name"] for topic in first["topics"]] == ["Normalfordeling"]
     assert queue["entries"][0]["topic"]["name"] == "Normalfordeling"
-    assert (part["attempt_count"], part["last_grade"], part["due"]) == (0, None, None)
-    assert len(part["solution"]["images"]) == 1
-    assert "0.16" in part["solution"]["text"]
+    assert (first["attempt_count"], first["last_grade"], first["due"]) == (0, None, None)
+    assert len(first["solution"]["images"]) == 1
+    assert "0.16" in first["solution"]["text"]
+    assert "Var(2X)" in first["solution"]["text"]
 
-    alone = queue["entries"][2]["task"]
-    assert alone["context"] is None
-    assert [member["number"] for member in alone["group"]] == ["2"]
-
-    for url in (*part["images"], *part["context"]["images"], *part["solution"]["images"]):
+    for url in (*first["images"], *first["solution"]["images"]):
         assert client.get(url).content.startswith(PNG_SIGNATURE)
 
 
 def test_logging_attempts_reorders_the_queue_and_updates_topics(client, approved_exam):
-    first, second, third = (e["task"] for e in practice_queue(client)["entries"])
+    first, second = (e["task"] for e in practice_queue(client)["entries"])
 
     failed = client.post(
         "/api/practice/attempts",
@@ -631,26 +624,27 @@ def test_logging_attempts_reorders_the_queue_and_updates_topics(client, approved
     assert (body["task_id"], body["grade"], body["score"]) == (first["id"], "again", 0.0)
     assert body["due"] > body["attempted_at"]
 
+    # The failed task is not due for a minute: the untouched one leads.
+    assert [e["task"]["number"] for e in practice_queue(client)["entries"]] == ["2", "1"]
+
     assert (
         client.post(
-            "/api/practice/attempts", json={"task_id": third["id"], "grade": "easy"}
+            "/api/practice/attempts", json={"task_id": second["id"], "grade": "easy"}
         ).json()["score"]
         == 1.0
     )
 
     queue = practice_queue(client)
-    numbers = [e["task"]["number"] for e in queue["entries"]]
-    # The untouched part leads; the task done well, and not due for days, is last.
-    assert numbers[0] == second["number"]
-    assert numbers[-1] == third["number"]
     by_number = {e["task"]["number"]: e["task"] for e in queue["entries"]}
-    assert (by_number["1a"]["attempt_count"], by_number["1a"]["last_grade"]) == (1, "again")
+    assert (by_number["1"]["attempt_count"], by_number["1"]["last_grade"]) == (1, "again")
     assert by_number["2"]["last_grade"] == "easy"
+    # The task that went well, and is not due for days, comes last.
+    assert [e["task"]["number"] for e in queue["entries"]] == ["1", "2"]
 
     topics = client.get("/api/practice/topics").json()
     assert [t["name"] for t in topics] == ["Normalfordeling", "Hypotesetest"]
     weak, strong = topics
-    assert (weak["task_count"], weak["attempted_count"]) == (2, 1)
+    assert (weak["task_count"], weak["attempted_count"]) == (1, 1)
     assert weak["mastery"] == 0.0
     # Not exactly zero: a few milliseconds have passed since the attempt.
     assert weak["weakness"] > strong["weakness"] == pytest.approx(0.0, abs=1e-6)
@@ -667,7 +661,7 @@ def test_the_queue_can_be_limited_to_a_topic_and_in_length(client, approved_exam
 
     short = practice_queue(client, limit=1)
     assert len(short["entries"]) == 1
-    assert short["total"] == 3
+    assert short["total"] == 2
 
     assert client.get("/api/practice/queue", params={"limit": 0}).status_code == 422
     unknown = "00000000-0000-0000-0000-000000000000"
@@ -678,16 +672,14 @@ def test_a_mock_exam_lists_the_exams_tasks_in_order(client, approved_exam):
     response = client.get(f"/api/practice/exams/{approved_exam['id']}/tasks")
     assert response.status_code == 200
     tasks = response.json()
-    assert [(t["number"], t["points"]) for t in tasks] == [("1a", 1), ("1b", 1), ("2", 3)]
-    assert len(tasks[1]["images"]) == 2  # the part that runs over a page break
+    assert [(t["number"], t["points"]) for t in tasks] == [("1", 2), ("2", 3)]
+    assert len(tasks[0]["images"]) == 2  # the task that runs over a page break
     missing = "00000000-0000-0000-0000-000000000000"
     assert client.get(f"/api/practice/exams/{missing}/tasks").status_code == 404
 
 
 def test_invalid_attempts_are_rejected(client, approved_exam, anonymous):
-    tasks = tasks_of(client, approved_exam)["tasks"]
-    parent = next(t for t in tasks if t["number"] == "1")
-    part = next(t for t in tasks if t["number"] == "1a")
+    part = tasks_of(client, approved_exam)["tasks"][0]
 
     def attempt(**fields):
         return client.post("/api/practice/attempts", json={"task_id": part["id"], **fields})
@@ -695,12 +687,6 @@ def test_invalid_attempts_are_rejected(client, approved_exam, anonymous):
     assert attempt(grade="perfect").status_code == 422
     assert attempt(grade="good", time_spent_seconds=-1).status_code == 422
     assert attempt().status_code == 422
-    assert (
-        client.post(
-            "/api/practice/attempts", json={"task_id": parent["id"], "grade": "good"}
-        ).status_code
-        == 409
-    )
     missing = "00000000-0000-0000-0000-000000000000"
     assert (
         client.post(
@@ -718,3 +704,215 @@ def test_invalid_attempts_are_rejected(client, approved_exam, anonymous):
         ("GET", f"/api/practice/exams/{approved_exam['id']}/tasks"),
     ]:
         assert anonymous.request(method, path).status_code == 401
+
+
+# --- dashboard, topic detail and settings ------------------------------------
+
+
+def test_health_check_needs_no_session(anonymous):
+    response = anonymous.get("/api/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_dashboard_before_and_after_practising(client, approved_exam):
+    before = client.get("/api/dashboard", params={"tz": "Europe/Oslo"}).json()
+    assert [s["code"] for s in before["subjects"]] == ["IDATT2202"]
+    assert (before["task_count"], before["attempted_count"]) == (2, 0)
+    assert (before["due_count"], before["streak_days"], before["attempts_today"]) == (0, 0, 0)
+    assert {t["name"] for t in before["weakest_topics"]} == {"Normalfordeling", "Hypotesetest"}
+    assert all(t["weakness"] == 1.0 for t in before["weakest_topics"])
+
+    first = practice_queue(client)["entries"][0]["task"]
+    client.post("/api/practice/attempts", json={"task_id": first["id"], "grade": "good"})
+
+    after = client.get("/api/dashboard", params={"tz": "Europe/Oslo"}).json()
+    assert (after["attempted_count"], after["streak_days"], after["attempts_today"]) == (1, 1, 1)
+    assert [t["name"] for t in after["weakest_topics"]] == ["Hypotesetest", "Normalfordeling"]
+
+
+def test_dashboard_accepts_any_time_zone_name_and_falls_back_to_utc(client, approved_exam):
+    for tz in ("Europe/Oslo", "America/Los_Angeles", "Not/AZone", ""):
+        assert client.get("/api/dashboard", params={"tz": tz}).status_code == 200
+    assert client.get("/api/dashboard").status_code == 200
+
+
+def test_topic_detail_shows_history_tasks_and_attempts(client, approved_exam):
+    topics = {t["name"]: t["id"] for t in client.get("/api/practice/topics").json()}
+    first = practice_queue(client)["entries"][0]["task"]
+    client.post(
+        "/api/practice/attempts",
+        json={"task_id": first["id"], "grade": "hard", "time_spent_seconds": 90, "note": "tregt"},
+    )
+
+    response = client.get(f"/api/topics/{topics['Normalfordeling']}", params={"tz": "Europe/Oslo"})
+    assert response.status_code == 200
+    detail = response.json()
+
+    assert detail["topic"]["name"] == "Normalfordeling"
+    assert (detail["topic"]["task_count"], detail["topic"]["attempted_count"]) == (1, 1)
+    assert [(t["number"], t["attempt_count"], t["last_grade"]) for t in detail["tasks"]] == [
+        ("1", 1, "hard"),
+    ]
+    assert detail["tasks"][0]["exam"]["label"] == "Høst 2023"
+    (attempt,) = detail["attempts"]
+    assert (attempt["grade"], attempt["score"], attempt["time_spent_seconds"]) == ("hard", 0.4, 90)
+    assert (attempt["note"], attempt["task_number"], attempt["exam_label"]) == (
+        "tregt",
+        "1",
+        "Høst 2023",
+    )
+    (point,) = detail["history"]
+    assert point["mastery"] == pytest.approx(0.4)
+
+    untouched = client.get(f"/api/topics/{topics['Hypotesetest']}").json()
+    assert (untouched["history"], untouched["attempts"]) == ([], [])
+    missing = "00000000-0000-0000-0000-000000000000"
+    assert client.get(f"/api/topics/{missing}").status_code == 404
+
+
+def test_settings_can_be_read_and_changed_and_change_the_scores(client, approved_exam):
+    assert client.get("/api/settings").json() == {
+        "mastery_weight": 0.6,
+        "staleness_weight": 0.25,
+        "coverage_weight": 0.15,
+        "preferred_language": "nb",
+    }
+    first = practice_queue(client)["entries"][0]["task"]
+    client.post("/api/practice/attempts", json={"task_id": first["id"], "grade": "easy"})
+
+    changed = client.put(
+        "/api/settings",
+        json={"mastery_weight": 0, "staleness_weight": 0, "coverage_weight": 1},
+    )
+    assert changed.status_code == 200
+    assert changed.json()["coverage_weight"] == 1
+    assert changed.json()["preferred_language"] == "nb"  # not mentioned, so kept
+
+    # Only coverage counts now: the attempted topic is covered, the other untried.
+    topics = {t["name"]: t for t in client.get("/api/practice/topics").json()}
+    assert topics["Normalfordeling"]["weakness"] == pytest.approx(0.0)
+    assert topics["Hypotesetest"]["weakness"] == pytest.approx(1.0)
+
+    assert (
+        client.put("/api/settings", json={"preferred_language": "en"}).json()["preferred_language"]
+        == "en"
+    )
+    assert client.get("/api/settings").json()["preferred_language"] == "en"
+
+
+def test_invalid_settings_are_rejected(client):
+    for body in (
+        {"mastery_weight": -1},
+        {"mastery_weight": 0, "staleness_weight": 0, "coverage_weight": 0},
+        {"preferred_language": "german"},
+        {"mastery_weight": "much"},
+    ):
+        assert client.put("/api/settings", json=body).status_code == 422
+    assert client.get("/api/settings").json()["mastery_weight"] == 0.6
+
+
+def test_the_language_setting_decides_which_version_of_the_next_exam_is_kept(
+    client, subject, build_pdf
+):
+    def page(word, question, order):
+        return [(f"{word} 1", {"bold": True}), question, (f"{word} 2", {"bold": True}), order]
+
+    pdf = build_pdf(
+        ["Eksamen / Exam"],
+        page("Oppgave", "Hva er sannsynligheten for at kula ikke er defekt?", "Regn ut svaret."),
+        page("Problem", "What is the probability that the ball is not defective?", "Compute it."),
+    )
+
+    norwegian = upload(client, pdf, label="Bokmål").json()
+    wait_until_processed(client, norwegian["id"])
+    client.put("/api/settings", json={"preferred_language": "en"})
+    english = upload(client, pdf, label="English").json()
+    wait_until_processed(client, english["id"])
+
+    def pages(exam):
+        return {r["page"] for t in tasks_of(client, exam)["tasks"] for r in t["regions"]}
+
+    assert [t["number"] for t in tasks_of(client, norwegian)["tasks"]] == ["1", "2"]
+    assert [t["number"] for t in tasks_of(client, english)["tasks"]] == ["1", "2"]
+    assert pages(norwegian) == {2}
+    assert pages(english) == {3}
+
+
+def test_new_endpoints_require_a_session(anonymous):
+    for method, path in [
+        ("GET", "/api/dashboard"),
+        ("GET", "/api/settings"),
+        ("PUT", "/api/settings"),
+        ("GET", "/api/topics/00000000-0000-0000-0000-000000000000"),
+    ]:
+        assert anonymous.request(method, path).status_code == 401
+
+
+# --- serving the built frontend ----------------------------------------------
+
+
+@pytest.fixture
+def served(tmp_path, settings):
+    """The app with a (stand-in) built frontend for the backend to serve."""
+    static = tmp_path / "static"
+    (static / "assets").mkdir(parents=True)
+    (static / "index.html").write_text("<!doctype html><title>levet</title>")
+    (static / "assets" / "index-abc123.js").write_text("console.log('app')")
+    (static / "manifest.webmanifest").write_text('{"name": "levet"}')
+    (static / "sw.js").write_text("// service worker")
+    (tmp_path / "secret.txt").write_text("outside the static directory")
+    with_static = Settings(password=PASSWORD, data_dir=settings.data_dir, static_dir=static)
+    with TestClient(create_app(build_container(with_static))) as client:
+        yield client
+
+
+def test_the_backend_serves_the_app_and_its_files(served):
+    page = served.get("/")
+    assert page.status_code == 200
+    assert "<title>levet</title>" in page.text
+    assert page.headers["cache-control"] == "no-cache"
+
+    script = served.get("/assets/index-abc123.js")
+    assert script.text == "console.log('app')"
+    assert "immutable" in script.headers["cache-control"]
+
+    manifest = served.get("/manifest.webmanifest")
+    assert manifest.headers["content-type"].startswith("application/manifest+json")
+    assert manifest.headers["cache-control"] == "no-cache"
+    assert served.get("/sw.js").headers["cache-control"] == "no-cache"
+
+
+def test_any_other_path_gets_the_app_so_that_deep_links_and_reloads_work(served):
+    for path in ("/practice", "/practice/topics/123", "/exams/abc", "/assets/missing.js"):
+        response = served.get(path)
+        assert response.status_code == 200
+        assert "<title>levet</title>" in response.text
+
+
+def test_the_api_is_untouched_by_the_frontend_route(served):
+    assert served.get("/api/health").json() == {"status": "ok"}
+    assert served.get("/api/subjects").status_code == 401
+    unknown = served.get("/api/nothing/here")
+    assert unknown.status_code == 404
+    assert unknown.headers["content-type"].startswith("application/json")
+    assert served.get("/api").status_code == 404
+
+
+def test_files_outside_the_static_directory_are_never_served(served):
+    for path in ("/../secret.txt", "/%2e%2e/secret.txt", "/assets/../../secret.txt"):
+        response = served.get(path)
+        assert "outside the static directory" not in response.text
+
+
+def test_without_a_static_directory_only_the_api_exists(anonymous):
+    assert anonymous.get("/").status_code == 404
+    assert anonymous.get("/practice").status_code == 404
+
+
+def test_a_static_directory_without_the_app_is_refused_at_start(tmp_path, settings):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    broken = Settings(password=PASSWORD, data_dir=settings.data_dir, static_dir=empty)
+    with pytest.raises(RuntimeError, match="index.html"):
+        create_app(build_container(broken))

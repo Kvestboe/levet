@@ -121,79 +121,49 @@ def test_points_are_read_from_the_heading_or_from_a_max_points_line():
     assert points == {"1": 15, "2": 10, "3": 4}
 
 
-# --- sub-tasks ---------------------------------------------------------------
+# --- a task is kept whole -----------------------------------------------------
 
 
-def test_lettered_sub_tasks_become_children_of_their_task():
+def test_a_task_with_lettered_parts_is_one_section_with_all_of_them():
     doc = Doc().heading("Oppgave 3: Normalfordeling").add("Felles innledning.").space(12)
-    doc.add("a) Finn forventningen.", bold=True).space(40)
+    doc.add("a) Finn forventningen.", bold=True).options("0.5", "0.7").space(40)
     doc.add("b) Finn variansen.").space(40)
     doc.add("(c) Finn medianen.")
-    sections = doc.segment()
-    assert numbers(sections) == ["3", "3a", "3b", "3c"]
-    assert [s.parent_number for s in sections] == [None, "3", "3", "3"]
-    assert sections[0].title == "Normalfordeling"
-    assert [s.title for s in sections[1:]] == [None, None, None]
+
+    (section,) = doc.segment()
+
+    assert (section.number, section.parent_number, section.title) == ("3", None, "Normalfordeling")
+    assert section.text.splitlines() == [
+        "Oppgave 3: Normalfordeling",
+        "Felles innledning.",
+        "a) Finn forventningen.",
+        "0.5",
+        "0.7",
+        "b) Finn variansen.",
+        "(c) Finn medianen.",
+    ]
 
 
-def test_each_section_holds_the_text_between_its_start_and_the_next():
-    doc = Doc().heading("Oppgave 3: Normalfordeling").add("Felles innledning.").space(12)
-    doc.add("a) Finn forventningen.").options("0.5", "0.7").space(12)
-    doc.add("b) Finn variansen.").add("Rund av til to desimaler.")
-    sections = by_number(doc.segment())
-    assert sections["3"].text == "Oppgave 3: Normalfordeling\nFelles innledning."
-    assert sections["3a"].text == "a) Finn forventningen.\n0.5\n0.7"
-    assert sections["3b"].text == "b) Finn variansen.\nRund av til to desimaler."
-
-
-def test_labels_must_come_in_alphabetical_order_at_the_left_edge():
-    doc = Doc().heading("Oppgave 1").add("Innledning.").space(12)
-    doc.add("a) Første del.").space(20)
-    doc.add("a) et svaralternativ, ikke en ny deloppgave", x=80).space(20)  # indented
-    doc.add("d) hopper for langt").space(20)  # c is missing: too big a jump
-    doc.add("b) Andre del.")
-    assert numbers(doc.segment()) == ["1", "1a", "1b"]
-
-
-def test_a_task_without_parts_is_a_single_section():
-    doc = Doc().heading("Oppgave 4: Varians").add("Regn ut variansen.").options("1", "2")
-    sections = doc.segment()
-    assert numbers(sections) == ["4"]
-    assert sections[0].parent_number is None
-
-
-def test_points_are_shared_equally_between_the_parts():
-    doc = Doc().heading("Oppgave 1").add("a) En.").space(30).add("b) To.").space(30)
-    doc.add("c) Tre.").add("Maks poeng: 6", x=456)
-    points = {s.number: s.points for s in doc.segment()}
-    assert points == {"1": 6, "1a": 2, "1b": 2, "1c": 2}
-
-
-def test_unlabelled_parts_are_split_at_their_answer_prompts_and_lettered_in_order():
-    doc = Doc().heading("Oppgave 1: Observasjoner").add("Vi har gjort tre observasjoner.").space(18)
-    doc.add("Hva blir gjennomsnittet?", gap=3).add("Velg ett alternativ:", bold=True).space(8)
-    doc.options("5.4", "4.2").space(20)
-    doc.add("Hva blir empirisk standardavvik?", gap=3).add("Velg ett alternativ", bold=True).space(
-        8
-    )
-    doc.options("1.4", "2.4").space(20)
-    doc.add("Hvilket er et 95% konfidensintervall?", gap=3).add("Velg ett alternativ", bold=True)
-    doc.space(8).options("[1, 2]", "[2, 3]")
-
-    sections = by_number(doc.segment())
-
-    assert list(sections) == ["1", "1a", "1b", "1c"]
-    assert sections["1"].text.endswith("Vi har gjort tre observasjoner.")
-    assert sections["1a"].text.startswith("Hva blir gjennomsnittet?")
-    assert sections["1a"].text.endswith("4.2")
-    assert sections["1b"].text.startswith("Hva blir empirisk standardavvik?")
-    assert sections["1c"].text.startswith("Hvilket er et 95% konfidensintervall?")
-
-
-def test_a_single_prompt_does_not_split_a_task():
-    doc = Doc().heading("Oppgave 1").add("Hva blir svaret?").add("Velg ett alternativ", bold=True)
-    doc.options("1", "2")
+def test_answer_prompts_do_not_split_a_task():
+    doc = Doc().heading("Oppgave 1: Observasjoner").add("Vi har gjort tre observasjoner.")
+    for question in ("Hva blir gjennomsnittet?", "Hva blir standardavviket?"):
+        doc.space(18).add(question).add("Velg ett alternativ", bold=True).options("1", "2")
     assert numbers(doc.segment()) == ["1"]
+
+
+def test_the_whole_tasks_points_stay_with_it():
+    doc = Doc().heading("Oppgave 1").add("a) En.").space(30).add("b) To.")
+    doc.add("Maks poeng: 6", x=456)
+    assert [(s.number, s.points) for s in doc.segment()] == [("1", 6)]
+
+
+def test_consecutive_tasks_follow_each_other_as_separate_sections():
+    doc = Doc().heading("Oppgave 1").add("a) En.").add("b) To.").space(20)
+    doc.heading("Oppgave 2").add("a) Tre.")
+    sections = doc.segment()
+    assert numbers(sections) == ["1", "2"]
+    assert "a) Tre." not in sections[0].text
+    assert sections[1].text.endswith("a) Tre.")
 
 
 # --- regions -----------------------------------------------------------------
@@ -202,23 +172,25 @@ def test_a_single_prompt_does_not_split_a_task():
 def test_sections_tile_the_page_from_the_first_heading_without_gaps_or_overlap():
     doc = Doc().heading("Oppgave 1").add("Innledning.").space(30)
     doc.add("a) En.").space(60).add("b) To.").space(60)
-    doc.heading("Oppgave 2").add("Tekst.").add("Maks poeng: 2", x=456)
+    doc.heading("Oppgave 2").add("Tekst.").space(30)
+    doc.heading("Oppgave 3").add("Tekst.")
     regions = [region for section in doc.segment() for region in section.regions]
-    assert [r.page for r in regions] == [1, 1, 1, 1]
-    for above, below in zip(regions, regions[1:], strict=False):
+    assert [r.page for r in regions[:3]] == [1, 1, 1]
+    for above, below in zip(regions[:2], regions[1:3], strict=True):
         assert below.top == pytest.approx(above.bottom)
     assert regions[0].top < 40 / 842  # starts just above the first heading
 
 
-def test_a_section_running_over_a_page_break_gets_one_region_per_page():
+def test_a_task_running_over_a_page_break_gets_one_region_per_page():
     doc = Doc().heading("Oppgave 1").add("a) Starter nederst på siden.").at(1, 700)
     doc.add("b) Spørsmålet står her.").at(2, 40).options("0.1", "0.2").space(30)
-    doc.add("c) Neste del.")
-    part = by_number(doc.segment())["1b"]
-    assert [region.page for region in part.regions] == [1, 2]
-    assert part.regions[0].bottom < 815 / 842  # stops above the footer
-    assert part.regions[1].top > 27 / 842  # starts below the header
-    assert "0.1" in part.text
+    doc.heading("Oppgave 2").add("Neste oppgave.")
+    task = doc.segment()[0]
+    assert [region.page for region in task.regions] == [1, 2]
+    assert task.regions[0].bottom < 815 / 842  # stops above the footer
+    assert task.regions[1].top > 27 / 842  # starts below the header
+    assert "0.1" in task.text
+    assert "Neste oppgave." not in task.text
 
 
 def test_running_headers_and_footers_are_left_out_of_text_and_regions():
@@ -231,7 +203,8 @@ def test_running_headers_and_footers_are_left_out_of_text_and_regions():
 
 
 def test_regions_share_one_horizontal_extent_around_the_text():
-    doc = Doc().heading("Oppgave 1").add("a) En.", width=400).space(30).add("b) To.", width=100)
+    doc = Doc().heading("Oppgave 1").add("En.", width=400).space(30)
+    doc.heading("Oppgave 2").add("To.", width=100)
     regions = [region for section in doc.segment() for region in section.regions]
     assert len({(r.left, r.right) for r in regions}) == 1
     assert 0 < regions[0].left < BODY_X / 595

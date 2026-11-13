@@ -35,12 +35,10 @@ def test_reads_position_size_and_weight_of_every_line(exam_pdf):
     assert title.x0 == pytest.approx(56, abs=1)
 
 
-def test_finds_tasks_parts_titles_and_points_in_an_exam(exam_pdf):
+def test_finds_whole_tasks_with_titles_and_points_in_an_exam(exam_pdf):
     sections = LayoutExtractor().extract(exam_pdf)
     assert summary(sections) == [
         ("1", None, "Normalfordeling", 2),
-        ("1a", "1", None, 1),
-        ("1b", "1", None, 1),
         ("2", None, "Hypotesetest", 3),
     ]
 
@@ -52,21 +50,27 @@ def test_front_matter_and_page_furniture_end_up_in_no_task(exam_pdf):
     assert "2/3" not in text
 
 
-def test_a_part_that_continues_on_the_next_page_spans_both(exam_pdf):
-    part = next(s for s in LayoutExtractor().extract(exam_pdf) if s.number == "1b")
-    assert [region.page for region in part.regions] == [2, 3]
-    assert part.text.splitlines() == ["b) Hva er variansen til 2X?", "4", "8", "Maks poeng: 2"]
-
-
-def test_finds_the_same_structure_in_the_solution(solution_pdf):
-    sections = LayoutExtractor().extract(solution_pdf)
-    assert [(s.number, s.parent_number) for s in sections] == [
-        ("1", None),
-        ("1a", "1"),
-        ("1b", "1"),
-        ("2", None),
+def test_a_task_keeps_all_its_parts_including_over_a_page_break(exam_pdf):
+    task = LayoutExtractor().extract(exam_pdf)[0]
+    assert [region.page for region in task.regions] == [2, 3]
+    assert task.text.splitlines() == [
+        "Oppgave 1: Normalfordeling",
+        "La X være normalfordelt med forventning 3.",
+        "a) Hva er sannsynligheten for at X er mindre enn 1?",
+        "0.16",
+        "0.84",
+        "b) Hva er variansen til 2X?",
+        "4",
+        "8",
+        "Maks poeng: 2",
     ]
-    assert "Var(2X) = 4 Var(X) = 8." in sections[2].text
+
+
+def test_finds_the_same_tasks_in_the_solution(solution_pdf):
+    sections = LayoutExtractor().extract(solution_pdf)
+    assert [(s.number, s.parent_number) for s in sections] == [("1", None), ("2", None)]
+    assert "Standardiserer" in sections[0].text
+    assert "Var(2X) = 4 Var(X) = 8." in sections[0].text
 
 
 def test_a_trilingual_exam_yields_one_copy_of_each_task(build_pdf):
@@ -138,15 +142,15 @@ def image_size(png):
 
 
 def test_a_region_is_rendered_trimmed_to_its_content(exam_pdf):
-    part = next(s for s in LayoutExtractor().extract(exam_pdf) if s.number == "1a")
-    (requested,) = part.regions
+    # Below part a of task 1 the page is empty for a long way before part b.
+    requested = Region(page=2, top=0.03, bottom=0.6, left=0.05, right=0.95)
 
     (rendered,) = PyMuPdfRenderer().render_regions(exam_pdf, [requested])
 
     assert rendered.png.startswith(PNG_SIGNATURE)
-    # Part a is followed by a tall gap before part b; the image leaves it out.
+    # The image leaves the empty space out.
     assert requested.height > 0.5
-    assert rendered.region.height < 0.15
+    assert rendered.region.height < 0.3
     assert requested.top <= rendered.region.top < rendered.region.bottom <= requested.bottom
     assert (rendered.region.left, rendered.region.right) == (requested.left, requested.right)
 
