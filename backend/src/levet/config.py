@@ -23,7 +23,10 @@ class Settings:
     LEVET_MAX_UPLOAD_MB   50        largest accepted PDF
     LEVET_SESSION_DAYS    30        how long a login lasts
     LEVET_LANGUAGE        nb        which version to keep of an exam printed in
-                                    several languages: nb, nn or en
+                                    several languages (nb, nn or en), until it
+                                    is changed on the Settings page
+    LEVET_STATIC_DIR      (none)    directory holding the built frontend; when
+                                    set, the backend serves the app itself
     """
 
     password: str
@@ -33,6 +36,7 @@ class Settings:
     max_upload_bytes: int = 50 * 1024 * 1024
     session_days: int = 30
     preferred_language: Language = DEFAULT_LANGUAGE
+    static_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if not self.password:
@@ -54,6 +58,7 @@ class Settings:
             max_upload_bytes=_int(env, "LEVET_MAX_UPLOAD_MB", 50) * 1024 * 1024,
             session_days=_int(env, "LEVET_SESSION_DAYS", 30),
             preferred_language=_language(env.get("LEVET_LANGUAGE")),
+            static_dir=Path(env["LEVET_STATIC_DIR"]) if env.get("LEVET_STATIC_DIR") else None,
         )
 
     @property

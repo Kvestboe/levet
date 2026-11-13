@@ -7,6 +7,7 @@ from levet.adapters.db.repositories import (
     SqlAttemptRepository,
     SqlExamRepository,
     SqlReviewStateRepository,
+    SqlSettingsRepository,
     SqlSubjectRepository,
     SqlTaskRepository,
     SqlTopicRepository,
@@ -27,6 +28,7 @@ class SqlAlchemyUnitOfWork:
         self.tasks = SqlTaskRepository(self._session)
         self.attempts = SqlAttemptRepository(self._session)
         self.review_states = SqlReviewStateRepository(self._session)
+        self.settings = SqlSettingsRepository(self._session)
         return self
 
     def __exit__(

@@ -143,3 +143,10 @@ class ReviewStateRow(Base):
     stability: Mapped[float | None]
     difficulty: Mapped[float | None]
     last_review: Mapped[datetime | None] = mapped_column(UtcDateTime)
+
+
+class SettingRow(Base):
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON)

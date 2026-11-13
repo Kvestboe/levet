@@ -17,6 +17,7 @@ def test_only_the_password_is_required():
     assert settings.max_upload_bytes == 50 * 1024 * 1024
     assert settings.session_days == 30
     assert settings.preferred_language is Language.BOKMAL
+    assert settings.static_dir is None
 
 
 def test_everything_can_be_overridden():
@@ -29,6 +30,7 @@ def test_everything_can_be_overridden():
             "LEVET_MAX_UPLOAD_MB": "10",
             "LEVET_SESSION_DAYS": "7",
             "LEVET_LANGUAGE": "EN",
+            "LEVET_STATIC_DIR": "/app/static",
         }
     )
     assert settings.db_path == Path("/srv/levet/levet.db")
@@ -37,6 +39,7 @@ def test_everything_can_be_overridden():
     assert settings.max_upload_bytes == 10 * 1024 * 1024
     assert settings.session_days == 7
     assert settings.preferred_language is Language.ENGLISH
+    assert settings.static_dir == Path("/app/static")
 
 
 @pytest.mark.parametrize(

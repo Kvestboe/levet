@@ -4,6 +4,7 @@ Only tasks of approved (``ready``) exams take part, and only tasks without
 sub-tasks are practised; a task with sub-tasks is the context of its parts.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Self
@@ -66,17 +67,18 @@ class PracticeService:
         self,
         uow_factory: UnitOfWorkFactory,
         clock: Clock,
-        scoring: ScoringConfig = DEFAULT_SCORING,
+        scoring: Callable[[], ScoringConfig] = lambda: DEFAULT_SCORING,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
+        # Asked for on every use, so a change in the settings applies at once.
         self._scoring = scoring
 
     def queue(self, topic_id: UUID | None = None, limit: int = 10) -> PracticeQueue:
         """What to practise now, best first; limited to one topic if ``topic_id`` is given."""
         now = self._clock()
         with self._uow_factory() as uow:
-            world = _World.load(uow)
+            world = PracticeData.load(uow)
         if topic_id is not None and topic_id not in world.topics:
             raise NotFound("no such topic")
 
@@ -86,7 +88,7 @@ class PracticeService:
             world.states,
             world.exam_dates,
             now,
-            self._scoring,
+            self._scoring(),
             topic_id,
         )
         return PracticeQueue(
@@ -106,9 +108,9 @@ class PracticeService:
         """Every topic that has tasks to practise, weakest and most urgent first."""
         now = self._clock()
         with self._uow_factory() as uow:
-            world = _World.load(uow)
+            world = PracticeData.load(uow)
         scores = score_topics(
-            world.candidates, world.attempts, world.exam_dates, now, self._scoring
+            world.candidates, world.attempts, world.exam_dates, now, self._scoring()
         )
         progress = [TopicProgress(world.topics[i], score) for i, score in scores.items()]
         return sorted(progress, key=lambda p: (-p.score.priority, p.topic.name.casefold()))
@@ -121,7 +123,7 @@ class PracticeService:
                 raise NotFound("no such exam")
             if exam.status is not ExamStatus.READY:
                 raise Conflict("only an approved exam can be practised")
-            world = _World.load(uow)
+            world = PracticeData.load(uow)
         return [
             world.practice_task(candidate.task_id)
             for candidate in world.candidates
@@ -166,8 +168,9 @@ class PracticeService:
 
 
 @dataclass(frozen=True, slots=True)
-class _World:
-    """Everything the practice logic looks at, read in one go."""
+class PracticeData:
+    """Everything the practice and progress logic looks at, read in one go:
+    the approved exams, their tasks, and what has been attempted."""
 
     exams: dict[UUID, Exam]
     tasks: dict[UUID, Task]

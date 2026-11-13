@@ -12,8 +12,10 @@ from levet.application.practice import (
     QueueEntry,
     TopicProgress,
 )
+from levet.application.progress import Dashboard, LoggedAttempt, TopicDetail
 from levet.application.review import ExamTasks
-from levet.domain import ExamStatus, Grade, Region, Subject, Task, Topic
+from levet.application.settings import AppSettings
+from levet.domain import ExamStatus, Grade, Language, Region, Subject, Task, Topic
 from levet.domain.practice import Reason
 
 
@@ -349,3 +351,130 @@ def _part(task: Task) -> TaskPart:
 
 def _image_urls(exam_id: UUID, keys: tuple[str, ...]) -> list[str]:
     return [_image_url(exam_id, key) for key in keys]
+
+
+# --- progress ------------------------------------------------------------------
+
+
+class DashboardOut(BaseModel):
+    subjects: list[SubjectOut]
+    weakest_topics: list[TopicProgressOut]
+    due_count: int
+    task_count: int
+    attempted_count: int
+    streak_days: int
+    attempts_today: int
+
+    @classmethod
+    def of(cls, dashboard: Dashboard) -> Self:
+        return cls(
+            subjects=[SubjectOut.of(subject) for subject in dashboard.subjects],
+            weakest_topics=[TopicProgressOut.of(p) for p in dashboard.weakest_topics],
+            due_count=dashboard.due_count,
+            task_count=dashboard.task_count,
+            attempted_count=dashboard.attempted_count,
+            streak_days=dashboard.streak_days,
+            attempts_today=dashboard.attempts_today,
+        )
+
+
+class MasteryPoint(BaseModel):
+    day: date
+    mastery: float
+
+
+class TopicTaskOut(BaseModel):
+    id: UUID
+    number: str
+    exam: ExamRef
+    attempt_count: int
+    last_grade: Grade | None
+    due: datetime | None
+
+    @classmethod
+    def of(cls, practice: PracticeTask) -> Self:
+        return cls(
+            id=practice.task.id,
+            number=practice.task.number,
+            exam=ExamRef(
+                id=practice.exam.id,
+                label=practice.exam.label,
+                subject_code=practice.exam.subject_code,
+            ),
+            attempt_count=practice.attempt_count,
+            last_grade=practice.last_grade,
+            due=practice.due,
+        )
+
+
+class LoggedAttemptOut(BaseModel):
+    id: UUID
+    attempted_at: datetime
+    grade: Grade
+    score: float
+    time_spent_seconds: float | None
+    answer: str | None
+    note: str | None
+    task_number: str
+    exam_label: str
+
+    @classmethod
+    def of(cls, logged: LoggedAttempt) -> Self:
+        attempt = logged.attempt
+        return cls(
+            id=attempt.id,
+            attempted_at=attempt.attempted_at,
+            grade=attempt.grade,
+            score=attempt.score,
+            time_spent_seconds=(
+                None if attempt.time_spent is None else attempt.time_spent.total_seconds()
+            ),
+            answer=attempt.answer,
+            note=attempt.note,
+            task_number=logged.task.number,
+            exam_label=logged.exam.label,
+        )
+
+
+class TopicDetailOut(BaseModel):
+    topic: TopicProgressOut
+    history: list[MasteryPoint]
+    tasks: list[TopicTaskOut]
+    attempts: list[LoggedAttemptOut]
+
+    @classmethod
+    def of(cls, detail: TopicDetail) -> Self:
+        return cls(
+            topic=TopicProgressOut.of(detail.progress),
+            history=[MasteryPoint(day=day, mastery=value) for day, value in detail.history],
+            tasks=[TopicTaskOut.of(task) for task in detail.tasks],
+            attempts=[LoggedAttemptOut.of(logged) for logged in detail.attempts],
+        )
+
+
+# --- settings ------------------------------------------------------------------
+
+
+class SettingsOut(BaseModel):
+    mastery_weight: float
+    staleness_weight: float
+    coverage_weight: float
+    preferred_language: Language
+
+    @classmethod
+    def of(cls, settings: AppSettings) -> Self:
+        return cls(
+            mastery_weight=settings.scoring.mastery_weight,
+            staleness_weight=settings.scoring.staleness_weight,
+            coverage_weight=settings.scoring.coverage_weight,
+            preferred_language=settings.preferred_language,
+        )
+
+
+class SettingsIn(BaseModel):
+    """Fields left out are not changed."""
+
+    mastery_weight: float | None = Field(default=None, ge=0, le=1000)
+    staleness_weight: float | None = Field(default=None, ge=0, le=1000)
+    coverage_weight: float | None = Field(default=None, ge=0, le=1000)
+    preferred_language: Language | None = None

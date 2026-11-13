@@ -80,6 +80,13 @@ class ReviewStateRepository(Protocol):
     def list_all(self) -> list[ReviewState]: ...
 
 
+class SettingsRepository(Protocol):
+    """Small JSON documents kept under a name, for settings changed in the app."""
+
+    def get(self, key: str) -> dict | None: ...
+    def set(self, key: str, value: dict) -> None: ...
+
+
 class UnitOfWork(Protocol):
     """One database transaction. Nothing is persisted unless ``commit`` is called."""
 
@@ -89,6 +96,7 @@ class UnitOfWork(Protocol):
     tasks: TaskRepository
     attempts: AttemptRepository
     review_states: ReviewStateRepository
+    settings: SettingsRepository
 
     def __enter__(self) -> Self: ...
     def __exit__(

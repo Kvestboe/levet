@@ -449,3 +449,20 @@ def test_review_state_round_trip_and_update(uow_factory, task, now):
         uow.commit()
     with uow_factory() as uow:
         assert uow.review_states.get(task.id) == reviewed
+
+
+# --- settings ----------------------------------------------------------------
+
+
+def test_settings_are_stored_as_documents_by_key(uow_factory):
+    with uow_factory() as uow:
+        assert uow.settings.get("app") is None
+        uow.settings.set("app", {"mastery_weight": 0.5, "preferred_language": "nn"})
+        uow.commit()
+    with uow_factory() as uow:
+        assert uow.settings.get("app") == {"mastery_weight": 0.5, "preferred_language": "nn"}
+        uow.settings.set("app", {"mastery_weight": 0.7})
+        uow.commit()
+    with uow_factory() as uow:
+        assert uow.settings.get("app") == {"mastery_weight": 0.7}
+        assert uow.settings.get("other") is None

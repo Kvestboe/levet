@@ -11,7 +11,7 @@ The pipeline:
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from uuid import UUID, uuid4
 
 from levet.application import storage_keys
@@ -49,7 +49,7 @@ class ExamProcessor:
         renderer: PageRenderer,
         extractor: ExtractionService,
         progress: ProgressTracker,
-        preferred_language: Language = DEFAULT_LANGUAGE,
+        preferred_language: Callable[[], Language] = lambda: DEFAULT_LANGUAGE,
     ) -> None:
         self._uow_factory = uow_factory
         self._files = files
@@ -158,16 +158,14 @@ class ExamProcessor:
         exam_pdf = documents[PageKind.EXAM]
         solution_pdf = documents.get(PageKind.SOLUTION)
 
-        sections = keep_preferred_language(
-            self._extractor.extract(exam_pdf), self._preferred_language
-        )
+        # Asked for per exam, so a change in the settings applies to the next upload.
+        language = self._preferred_language()
+        sections = keep_preferred_language(self._extractor.extract(exam_pdf), language)
         solutions: dict[str, list[ExtractedSection]] = {}
         if solution_pdf is not None:
             solutions = match_solutions(
                 sections,
-                keep_preferred_language(
-                    self._extractor.extract(solution_pdf), self._preferred_language
-                ),
+                keep_preferred_language(self._extractor.extract(solution_pdf), language),
             )
 
         # Images from an earlier, failed run are no longer referenced by anything.

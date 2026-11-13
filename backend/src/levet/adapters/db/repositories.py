@@ -14,6 +14,7 @@ from levet.adapters.db.models import (
     AttemptRow,
     ExamRow,
     ReviewStateRow,
+    SettingRow,
     SubjectRow,
     TaskRow,
     TaskTopicRow,
@@ -258,6 +259,18 @@ class SqlReviewStateRepository:
 
     def list_all(self) -> list[ReviewState]:
         return [_review_state(row) for row in self._session.scalars(select(ReviewStateRow))]
+
+
+class SqlSettingsRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, key: str) -> dict | None:
+        row = self._session.get(SettingRow, key)
+        return None if row is None else dict(row.value)
+
+    def set(self, key: str, value: dict) -> None:
+        _merge(self._session, SettingRow(key=key, value=value))
 
 
 def _merge(session: Session, row: object) -> None:

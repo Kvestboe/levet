@@ -129,7 +129,7 @@ def process(uow_factory, files, progress):
     def run(exam, renderer=None, sections=None, language=Language.BOKMAL):
         renderer = renderer or FakeRenderer({EXAM_PDF: 2, SOLUTION_PDF: 1})
         processor = ExamProcessor(
-            uow_factory, files, renderer, FakeExtractor(sections), progress, language
+            uow_factory, files, renderer, FakeExtractor(sections), progress, lambda: language
         )
         processor.process(exam.id)
         return processor

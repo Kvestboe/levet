@@ -18,9 +18,12 @@ from levet.application.exams import ExamService
 from levet.application.ports import Clock
 from levet.application.practice import PracticeService
 from levet.application.processing import ExamProcessor
+from levet.application.progress import ProgressService
 from levet.application.review import ReviewService
+from levet.application.settings import AppSettings, SettingsService
 from levet.application.subjects import SubjectService
 from levet.config import Settings
+from levet.domain.scoring import ScoringConfig
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +40,8 @@ class Container:
     exams: ExamService
     review: ReviewService
     practice: PracticeService
+    progress: ProgressService
+    preferences: SettingsService
     processor: ExamProcessor
     jobs: ThreadedJobQueue
     sessions: SessionManager
@@ -63,16 +68,24 @@ def build_container(settings: Settings, clock: Clock = utc_now) -> Container:
     def uow_factory() -> SqlAlchemyUnitOfWork:
         return SqlAlchemyUnitOfWork(session_factory)
 
+    # Settings changed in the app; the environment supplies the starting values.
+    preferences = SettingsService(
+        uow_factory, AppSettings(preferred_language=settings.preferred_language)
+    )
+
+    def scoring() -> ScoringConfig:
+        return preferences.get().scoring
+
     files = LocalFileStore(settings.files_dir)
-    progress = InMemoryProgress()
+    tracker = InMemoryProgress()
     renderer = PyMuPdfRenderer(settings.render_dpi)
     processor = ExamProcessor(
         uow_factory,
         files,
         renderer,
         LayoutExtractor(),
-        progress,
-        preferred_language=settings.preferred_language,
+        tracker,
+        preferred_language=lambda: preferences.get().preferred_language,
     )
     jobs = ThreadedJobQueue(processor.process)
 
@@ -82,9 +95,11 @@ def build_container(settings: Settings, clock: Clock = utc_now) -> Container:
         settings=settings,
         engine=engine,
         subjects=SubjectService(uow_factory),
-        exams=ExamService(uow_factory, files, jobs, progress, clock),
+        exams=ExamService(uow_factory, files, jobs, tracker, clock),
         review=ReviewService(uow_factory, files, renderer),
-        practice=PracticeService(uow_factory, clock),
+        practice=PracticeService(uow_factory, clock, scoring),
+        progress=ProgressService(uow_factory, clock, scoring),
+        preferences=preferences,
         processor=processor,
         jobs=jobs,
         sessions=SessionManager(
