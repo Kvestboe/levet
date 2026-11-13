@@ -6,7 +6,8 @@ tasks and manages what to practise next. The full specification is in
 
 The app is being built in milestones. So far: the domain model and scoring,
 the database, login, subjects, exam upload with page rendering, task
-extraction, and the review screen. Practice comes next.
+extraction, the review screen, and practice. The dashboard, installable app
+and Docker image come next.
 
 ## How tasks are extracted
 
@@ -24,6 +25,25 @@ as one task per page, which can be split by hand in the review screen.
 Topics are suggested from task titles and reuse the subject's existing
 topics when the names match. They can be changed per task, and renamed or
 merged for the whole subject, in the review screen.
+
+## How practice works
+
+Only tasks of approved exams are practised. There are three modes:
+
+- **Practise now** serves one task at a time from a queue that alternates
+  between tasks you have failed and that are due again, and tasks from your
+  weakest topics, new ones first. A topic's weakness combines how well its
+  tasks went (recent attempts count more), how long since you practised it and
+  how much of it you have not tried; topics of a subject whose exam is close
+  rank higher.
+- **By topic** is the same queue limited to one topic.
+- **Mock exam** is a whole exam against the clock, graded against the
+  solutions at the end.
+
+You grade yourself Again, Hard, Good or Easy. The grade schedules the task
+with FSRS, the algorithm Anki uses: a failed task returns within minutes, one
+that went well after days. On a keyboard, space shows the solution and 1-4
+grade.
 
 ## Development
 
