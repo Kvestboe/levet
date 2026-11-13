@@ -1,0 +1,14 @@
+# Keep the build context small, and private data out of the image.
+.git
+.env
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/data
+data
+eksamener
+backend/tests
+*.md

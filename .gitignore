@@ -22,3 +22,4 @@ backend/data/
 
 ### Exam PDFs used for testing (not for the repository) ###
 eksamener/
+backend/data-backup-*/

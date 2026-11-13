@@ -1,0 +1,30 @@
+# levet: one container, one volume.
+#
+#   cp .env.example .env    # then set LEVET_PASSWORD in it
+#   docker compose up -d
+#
+# The app is then at http://localhost:8000.
+
+services:
+  levet:
+    build: .
+    image: levet
+    restart: unless-stopped
+    ports:
+      - "${LEVET_PORT:-8000}:8000"
+    environment:
+      LEVET_PASSWORD: ${LEVET_PASSWORD:?Set LEVET_PASSWORD in the .env file}
+      LEVET_SECRET_KEY: ${LEVET_SECRET_KEY:-}
+      LEVET_LANGUAGE: ${LEVET_LANGUAGE:-nb}
+      LEVET_MAX_UPLOAD_MB: ${LEVET_MAX_UPLOAD_MB:-50}
+      LEVET_SESSION_DAYS: ${LEVET_SESSION_DAYS:-30}
+      # Trust the X-Forwarded-* headers of whatever sits in front of the
+      # container (a reverse proxy doing HTTPS). Nothing else can reach the app
+      # except through the published port.
+      FORWARDED_ALLOW_IPS: "*"
+    volumes:
+      - levet-data:/data
+
+volumes:
+  # The SQLite database, the uploaded PDFs and every image. Back this up.
+  levet-data:
