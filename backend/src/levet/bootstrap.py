@@ -16,6 +16,7 @@ from levet.adapters.jobs.worker import InMemoryProgress, ThreadedJobQueue
 from levet.adapters.pdf.pymupdf_renderer import PyMuPdfRenderer
 from levet.application.exams import ExamService
 from levet.application.ports import Clock
+from levet.application.practice import PracticeService
 from levet.application.processing import ExamProcessor
 from levet.application.review import ReviewService
 from levet.application.subjects import SubjectService
@@ -35,6 +36,7 @@ class Container:
     subjects: SubjectService
     exams: ExamService
     review: ReviewService
+    practice: PracticeService
     processor: ExamProcessor
     jobs: ThreadedJobQueue
     sessions: SessionManager
@@ -82,6 +84,7 @@ def build_container(settings: Settings, clock: Clock = utc_now) -> Container:
         subjects=SubjectService(uow_factory),
         exams=ExamService(uow_factory, files, jobs, progress, clock),
         review=ReviewService(uow_factory, files, renderer),
+        practice=PracticeService(uow_factory, clock),
         processor=processor,
         jobs=jobs,
         sessions=SessionManager(

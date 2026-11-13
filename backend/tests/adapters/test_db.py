@@ -330,6 +330,46 @@ def test_deleting_a_task_removes_its_topic_links_attempts_and_review_state(uow_f
         assert uow.topics.get(topic.id) == topic
 
 
+def test_tasks_can_be_listed_for_every_exam_with_a_status(uow_factory, exam, now):
+    ready = save_exam(uow_factory, now + timedelta(hours=1), label="Klar", status=ExamStatus.READY)
+    older = save_exam(uow_factory, now - timedelta(hours=1), label="Eldre", status=ExamStatus.READY)
+    with uow_factory() as uow:
+        uow.tasks.save(Task(exam_id=exam.id, number="under behandling"))
+        uow.tasks.save(Task(exam_id=ready.id, number="2", position=1))
+        uow.tasks.save(Task(exam_id=ready.id, number="1", position=0))
+        uow.tasks.save(Task(exam_id=older.id, number="1"))
+        uow.commit()
+    with uow_factory() as uow:
+        listed = uow.tasks.list_by_exam_status(ExamStatus.READY)
+    # Oldest exam first, each exam's tasks in document order.
+    assert [(t.exam_id, t.number) for t in listed] == [
+        (older.id, "1"),
+        (ready.id, "1"),
+        (ready.id, "2"),
+    ]
+
+
+def test_tasks_can_be_listed_by_topic(uow_factory, exam):
+    wanted = Topic(subject_code="IDATT2202", name="Paging")
+    other = Topic(subject_code="IDATT2202", name="Deadlock")
+    with uow_factory() as uow:
+        uow.topics.save(wanted)
+        uow.topics.save(other)
+        uow.tasks.save(Task(exam_id=exam.id, number="1", topic_ids={wanted.id}))
+        uow.tasks.save(Task(exam_id=exam.id, number="2", position=1, topic_ids={other.id}))
+        uow.tasks.save(
+            Task(exam_id=exam.id, number="3", position=2, topic_ids={wanted.id, other.id})
+        )
+        uow.commit()
+    with uow_factory() as uow:
+        assert [t.number for t in uow.tasks.list_by_topic(wanted.id)] == ["1", "3"]
+        uow.topics.delete(other.id)
+        uow.commit()
+    with uow_factory() as uow:
+        assert [t.name for t in uow.topics.list_by_subject("IDATT2202")] == ["Paging"]
+        assert uow.tasks.get(uow.tasks.list_by_exam(exam.id)[2].id).topic_ids == {wanted.id}
+
+
 # --- attempts ----------------------------------------------------------------
 
 
@@ -358,6 +398,22 @@ def test_attempt_round_trip_listed_oldest_first(uow_factory, task, now):
         uow.commit()
     with uow_factory() as uow:
         assert uow.attempts.list_by_task(task.id) == [first, second]
+
+
+def test_all_attempts_and_review_states_can_be_listed(uow_factory, exam, task, now):
+    other = Task(exam_id=exam.id, number="2", position=1)
+    later = Attempt(task_id=other.id, attempted_at=now, grade=Grade.GOOD)
+    earlier = Attempt(task_id=task.id, attempted_at=now - timedelta(hours=1), grade=Grade.AGAIN)
+    with uow_factory() as uow:
+        uow.tasks.save(other)
+        uow.attempts.add(later)
+        uow.attempts.add(earlier)
+        uow.review_states.save(ReviewState(task_id=task.id, due=now))
+        uow.review_states.save(ReviewState(task_id=other.id, due=now + timedelta(days=1)))
+        uow.commit()
+    with uow_factory() as uow:
+        assert uow.attempts.list_all() == [earlier, later]
+        assert {state.task_id for state in uow.review_states.list_all()} == {task.id, other.id}
 
 
 def test_an_attempt_cannot_be_added_twice(uow_factory, task, now):

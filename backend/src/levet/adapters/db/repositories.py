@@ -38,8 +38,9 @@ class SqlSubjectRepository:
         self._session = session
 
     def save(self, subject: Subject) -> None:
-        self._session.merge(
-            SubjectRow(code=subject.code, name=subject.name, exam_date=subject.exam_date)
+        _merge(
+            self._session,
+            SubjectRow(code=subject.code, name=subject.name, exam_date=subject.exam_date),
         )
 
     def get(self, code: str) -> Subject | None:
@@ -59,7 +60,9 @@ class SqlTopicRepository:
         self._session = session
 
     def save(self, topic: Topic) -> None:
-        self._session.merge(TopicRow(id=topic.id, subject_code=topic.subject_code, name=topic.name))
+        _merge(
+            self._session, TopicRow(id=topic.id, subject_code=topic.subject_code, name=topic.name)
+        )
 
     def get(self, topic_id: UUID) -> Topic | None:
         row = self._session.get(TopicRow, topic_id)
@@ -88,7 +91,8 @@ class SqlExamRepository:
         self._session = session
 
     def save(self, exam: Exam) -> None:
-        self._session.merge(
+        _merge(
+            self._session,
             ExamRow(
                 id=exam.id,
                 subject_code=exam.subject_code,
@@ -100,7 +104,7 @@ class SqlExamRepository:
                 page_count=exam.page_count,
                 solution_page_count=exam.solution_page_count,
                 uploaded_at=exam.uploaded_at,
-            )
+            ),
         )
 
     def get(self, exam_id: UUID) -> Exam | None:
@@ -131,7 +135,8 @@ class SqlTaskRepository:
         self._session = session
 
     def save(self, task: Task) -> None:
-        self._session.merge(
+        _merge(
+            self._session,
             TaskRow(
                 id=task.id,
                 exam_id=task.exam_id,
@@ -150,7 +155,7 @@ class SqlTaskRepository:
                     TaskTopicRow(task_id=task.id, topic_id=topic_id)
                     for topic_id in sorted(task.topic_ids, key=str)
                 ],
-            )
+            ),
         )
 
     def get(self, task_id: UUID) -> Task | None:
@@ -171,6 +176,15 @@ class SqlTaskRepository:
             .join(TaskTopicRow, TaskTopicRow.task_id == TaskRow.id)
             .where(TaskTopicRow.topic_id == topic_id)
             .order_by(TaskRow.exam_id, TaskRow.position)
+        )
+        return [_task(row) for row in rows]
+
+    def list_by_exam_status(self, status: ExamStatus) -> list[Task]:
+        rows = self._session.scalars(
+            select(TaskRow)
+            .join(ExamRow, ExamRow.id == TaskRow.exam_id)
+            .where(ExamRow.status == status.value)
+            .order_by(ExamRow.uploaded_at, ExamRow.id, TaskRow.position)
         )
         return [_task(row) for row in rows]
 
@@ -215,13 +229,18 @@ class SqlAttemptRepository:
         )
         return [_attempt(row) for row in rows]
 
+    def list_all(self) -> list[Attempt]:
+        rows = self._session.scalars(select(AttemptRow).order_by(AttemptRow.attempted_at))
+        return [_attempt(row) for row in rows]
+
 
 class SqlReviewStateRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
     def save(self, state: ReviewState) -> None:
-        self._session.merge(
+        _merge(
+            self._session,
             ReviewStateRow(
                 task_id=state.task_id,
                 due=state.due,
@@ -230,12 +249,26 @@ class SqlReviewStateRepository:
                 stability=state.stability,
                 difficulty=state.difficulty,
                 last_review=state.last_review,
-            )
+            ),
         )
 
     def get(self, task_id: UUID) -> ReviewState | None:
         row = self._session.get(ReviewStateRow, task_id)
         return None if row is None else _review_state(row)
+
+    def list_all(self) -> list[ReviewState]:
+        return [_review_state(row) for row in self._session.scalars(select(ReviewStateRow))]
+
+
+def _merge(session: Session, row: object) -> None:
+    """Insert or update a row, and send it to the database straight away.
+
+    Flushing at once means writes reach the database in the order the
+    repositories are called. Left to itself the session may insert a row before
+    the row it refers to, when the two tables are not linked by a relationship.
+    """
+    session.merge(row)
+    session.flush()
 
 
 def _subject(row: SubjectRow) -> Subject:
