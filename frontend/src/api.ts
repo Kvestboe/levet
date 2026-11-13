@@ -148,6 +148,58 @@ export type AttemptResult = {
   due: string
 }
 
+export type Dashboard = {
+  /** Nearest exam first. */
+  subjects: Subject[]
+  weakest_topics: TopicProgress[]
+  /** Failed tasks that are due again. */
+  due_count: number
+  task_count: number
+  attempted_count: number
+  streak_days: number
+  attempts_today: number
+}
+
+export type MasteryPoint = {
+  day: string // YYYY-MM-DD
+  mastery: number // 0-1
+}
+
+export type TopicDetail = {
+  topic: TopicProgress
+  /** Mastery at the end of each day since the first attempt. */
+  history: MasteryPoint[]
+  tasks: {
+    id: string
+    number: string
+    exam: { id: string; label: string; subject_code: string }
+    attempt_count: number
+    last_grade: Grade | null
+    due: string | null
+  }[]
+  /** Newest first. */
+  attempts: {
+    id: string
+    attempted_at: string
+    grade: Grade
+    score: number
+    time_spent_seconds: number | null
+    answer: string | null
+    note: string | null
+    task_number: string
+    exam_label: string
+  }[]
+}
+
+export type Language = 'nb' | 'nn' | 'en'
+
+export type AppSettings = {
+  mastery_weight: number
+  staleness_weight: number
+  coverage_weight: number
+  preferred_language: Language
+}
+
 export class ApiError extends Error {
   readonly status: number
 
@@ -247,10 +299,22 @@ export const api = {
   recordAttempt: (attempt: AttemptInput) =>
     request<AttemptResult>('/practice/attempts', json('POST', attempt)),
 
+  dashboard: () => request<Dashboard>(`/dashboard?tz=${encodeURIComponent(timeZone())}`),
+  topicDetail: (topicId: string) =>
+    request<TopicDetail>(`/topics/${topicId}?tz=${encodeURIComponent(timeZone())}`),
+  settings: () => request<AppSettings>('/settings'),
+  updateSettings: (changes: Partial<AppSettings>) =>
+    request<AppSettings>('/settings', json('PUT', changes)),
+
   renameTopic: (topicId: string, name: string) =>
     request<Topic>(`/topics/${topicId}`, json('PATCH', { name })),
   splitTask: (taskId: string, imageIndex: number, fraction: number) =>
     request<void>(`/tasks/${taskId}/split`, json('POST', { image_index: imageIndex, fraction })),
+}
+
+/** The browser's time zone, so that "today" and the streak follow the user's own days. */
+function timeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC'
 }
 
 export function pageImageUrl(examId: string, kind: PageKind, number: number): string {

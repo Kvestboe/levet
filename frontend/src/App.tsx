@@ -1,6 +1,7 @@
-import { Link, Navigate, Route, Routes } from 'react-router'
+import { Link, Route, Routes } from 'react-router'
 import { Layout } from './components/Layout.tsx'
 import { Button, ErrorMessage, Loading, PageTitle } from './components/ui.tsx'
+import { DashboardPage } from './pages/DashboardPage.tsx'
 import { ExamDetailPage } from './pages/ExamDetailPage.tsx'
 import { ExamsPage } from './pages/ExamsPage.tsx'
 import { LoginPage } from './pages/LoginPage.tsx'
@@ -12,7 +13,9 @@ import {
   TopicList,
   TopicSession,
 } from './pages/PracticePage.tsx'
+import { SettingsPage } from './pages/SettingsPage.tsx'
 import { SubjectsPage } from './pages/SubjectsPage.tsx'
+import { TopicDetailPage } from './pages/TopicDetailPage.tsx'
 import { useSession } from './queries.ts'
 
 export default function App() {
@@ -32,7 +35,7 @@ export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route index element={<Navigate to="/practice" replace />} />
+        <Route index element={<DashboardPage />} />
         <Route path="practice" element={<PracticePage />}>
           <Route index element={<PractiseNow />} />
           <Route path="topics" element={<TopicList />} />
@@ -43,6 +46,8 @@ export default function App() {
         <Route path="exams" element={<ExamsPage />} />
         <Route path="exams/:examId" element={<ExamDetailPage />} />
         <Route path="subjects" element={<SubjectsPage />} />
+        <Route path="topics/:topicId" element={<TopicDetailPage />} />
+        <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
@@ -53,8 +58,8 @@ function NotFound() {
   return (
     <>
       <PageTitle>Page not found</PageTitle>
-      <Link to="/practice" className="text-indigo-600 hover:underline">
-        Go to practice
+      <Link to="/" className="text-indigo-600 hover:underline">
+        Go to the dashboard
       </Link>
     </>
   )

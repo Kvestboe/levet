@@ -37,3 +37,13 @@ createRoot(document.getElementById('root')!).render(
     </QueryClientProvider>
   </StrictMode>,
 )
+
+// The service worker is what makes the app installable. Only in a built app:
+// during development it would serve stale files.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // Not fatal: the app works the same in the browser without it.
+    })
+  })
+}

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api.ts'
-import type { Exam, TaskChanges } from './api.ts'
+import type { AppSettings, Exam, TaskChanges } from './api.ts'
 
 export const keys = {
   session: ['session'] as const,
@@ -12,6 +12,9 @@ export const keys = {
   practiceQueue: (topicId?: string) => ['practice', 'queue', topicId ?? 'all'] as const,
   practiceTopics: ['practice', 'topics'] as const,
   mockExam: (examId: string) => ['practice', 'exam', examId] as const,
+  dashboard: ['dashboard'] as const,
+  topicDetail: (topicId: string) => ['topics', topicId] as const,
+  settings: ['settings'] as const,
 }
 
 // How often to ask for news while an exam is being processed.
@@ -182,4 +185,32 @@ export function useMockExamTasks(examId: string) {
 /** Logs an attempt. The caller decides when to ask for the queue again. */
 export function useRecordAttempt() {
   return useMutation({ mutationFn: api.recordAttempt })
+}
+
+// --- dashboard, topic detail and settings ----------------------------------
+
+// These follow the practice history and the clock, so they are always fetched afresh.
+
+export function useDashboard() {
+  return useQuery({ queryKey: keys.dashboard, queryFn: api.dashboard, staleTime: 0 })
+}
+
+export function useTopicDetail(topicId: string) {
+  return useQuery({
+    queryKey: keys.topicDetail(topicId),
+    queryFn: () => api.topicDetail(topicId),
+    staleTime: 0,
+  })
+}
+
+export function useSettings() {
+  return useQuery({ queryKey: keys.settings, queryFn: api.settings })
+}
+
+export function useUpdateSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (changes: Partial<AppSettings>) => api.updateSettings(changes),
+    onSuccess: (settings) => queryClient.setQueryData(keys.settings, settings),
+  })
 }

@@ -1,6 +1,8 @@
 import { Link, NavLink, Outlet, useParams } from 'react-router'
 import { PracticeSession } from '../components/PracticeSession.tsx'
+import { WeaknessMeter } from '../components/progress.tsx'
 import { Card, ErrorMessage, Loading, PageTitle } from '../components/ui.tsx'
+import { percent, weaknessLevel } from '../progress.ts'
 import { useExams, usePracticeTopics } from '../queries.ts'
 
 const modes = [
@@ -50,51 +52,39 @@ export function TopicList() {
   return (
     <ul className="space-y-2">
       {topics.data.map((topic) => (
-        <li key={topic.id}>
-          <Link
-            to={`/practice/topics/${topic.id}`}
-            className="block rounded-xl border border-slate-200 bg-white p-4 shadow-xs transition-colors hover:border-indigo-300"
-          >
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="font-medium break-words">{topic.name}</span>
-              <span className="shrink-0 font-mono text-xs text-slate-500">{topic.subject_code}</span>
-            </div>
-            <div
-              className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200"
-              role="meter"
-              aria-label={`Weakness of ${topic.name}`}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(topic.weakness * 100)}
+        <li key={topic.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="min-w-0 font-medium break-words">{topic.name}</span>
+            <span className="shrink-0 font-mono text-xs text-slate-500">{topic.subject_code}</span>
+          </div>
+          <div className="mt-2">
+            <WeaknessMeter name={topic.name} weakness={topic.weakness} />
+          </div>
+          <p className="mt-1.5 text-xs text-slate-500">
+            {weaknessLevel(topic.weakness).label} · {topic.attempted_count} of {topic.task_count}{' '}
+            {topic.task_count === 1 ? 'task' : 'tasks'} attempted
+            {topic.mastery !== null && ` · mastery ${percent(topic.mastery)}`}
+          </p>
+          <div className="mt-3 flex gap-2">
+            <Link
+              to={`/practice/topics/${topic.id}`}
+              aria-label={`Practise ${topic.name}`}
+              className="inline-flex min-h-10 items-center rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-500"
             >
-              <div
-                className={`h-full rounded-full ${weaknessColour(topic.weakness)}`}
-                style={{ width: `${Math.max(2, topic.weakness * 100)}%` }}
-              />
-            </div>
-            <p className="mt-1.5 text-xs text-slate-500">
-              {describeWeakness(topic.weakness)} · {topic.attempted_count} of {topic.task_count}{' '}
-              {topic.task_count === 1 ? 'task' : 'tasks'} attempted
-              {topic.mastery !== null && ` · mastery ${Math.round(topic.mastery * 100)}%`}
-            </p>
-          </Link>
+              Practise
+            </Link>
+            <Link
+              to={`/topics/${topic.id}`}
+              aria-label={`Details of ${topic.name}`}
+              className="inline-flex min-h-10 items-center rounded-lg border border-slate-300 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Details
+            </Link>
+          </div>
         </li>
       ))}
     </ul>
   )
-}
-
-function weaknessColour(weakness: number): string {
-  if (weakness >= 0.66) return 'bg-red-500'
-  if (weakness >= 0.33) return 'bg-amber-500'
-  return 'bg-emerald-500'
-}
-
-function describeWeakness(weakness: number): string {
-  if (weakness >= 0.999) return 'Not practised yet'
-  if (weakness >= 0.66) return 'Weak'
-  if (weakness >= 0.33) return 'Getting there'
-  return 'Strong'
 }
 
 export function TopicSession() {
