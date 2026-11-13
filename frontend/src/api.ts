@@ -74,6 +74,80 @@ export type TaskChanges = {
   topics?: string[]
 }
 
+export type Grade = 'again' | 'hard' | 'good' | 'easy'
+
+/** Why a task is in the practice queue. */
+export type Reason = 'due' | 'new' | 'weak'
+
+/** One piece of a task as printed: a label and its images. */
+export type TaskPart = {
+  id: string
+  number: string
+  images: string[]
+}
+
+export type PracticeTask = {
+  id: string
+  number: string
+  title: string | null
+  points: number | null
+  exam: { id: string; label: string; subject_code: string }
+  images: string[]
+  /** The introduction shared by the parts of the task this one belongs to. */
+  context: TaskPart | null
+  /** The whole task in order: the introduction and every part. */
+  group: TaskPart[]
+  solution: { images: string[]; text: string | null } | null
+  topics: Topic[]
+  attempt_count: number
+  last_grade: Grade | null
+  due: string | null
+}
+
+export type QueueEntry = {
+  task: PracticeTask
+  reason: Reason
+  topic: Topic | null
+}
+
+export type PracticeQueue = {
+  entries: QueueEntry[]
+  total: number
+  due_count: number
+}
+
+export type TopicProgress = {
+  id: string
+  name: string
+  subject_code: string
+  weakness: number
+  mastery: number | null
+  staleness: number
+  coverage_gap: number
+  urgency: number
+  priority: number
+  task_count: number
+  attempted_count: number
+}
+
+export type AttemptInput = {
+  task_id: string
+  grade: Grade
+  time_spent_seconds?: number
+  answer?: string
+  note?: string
+}
+
+export type AttemptResult = {
+  id: string
+  task_id: string
+  grade: Grade
+  score: number
+  attempted_at: string
+  /** When the task is due again. */
+  due: string
+}
+
 export class ApiError extends Error {
   readonly status: number
 
@@ -166,6 +240,13 @@ export const api = {
   deleteTask: (taskId: string) => request<void>(`/tasks/${taskId}`, { method: 'DELETE' }),
   mergeTaskWithPrevious: (taskId: string) =>
     request<void>(`/tasks/${taskId}/merge-previous`, { method: 'POST' }),
+  practiceQueue: (topicId?: string) =>
+    request<PracticeQueue>(`/practice/queue${topicId ? `?topic_id=${topicId}` : ''}`),
+  practiceTopics: () => request<TopicProgress[]>('/practice/topics'),
+  mockExamTasks: (examId: string) => request<PracticeTask[]>(`/practice/exams/${examId}/tasks`),
+  recordAttempt: (attempt: AttemptInput) =>
+    request<AttemptResult>('/practice/attempts', json('POST', attempt)),
+
   renameTopic: (topicId: string, name: string) =>
     request<Topic>(`/topics/${topicId}`, json('PATCH', { name })),
   splitTask: (taskId: string, imageIndex: number, fraction: number) =>

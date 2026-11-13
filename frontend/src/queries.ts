@@ -8,6 +8,10 @@ export const keys = {
   exams: ['exams'] as const,
   exam: (id: string) => ['exams', id] as const,
   examTasks: (id: string) => ['exams', id, 'tasks'] as const,
+  practice: ['practice'] as const,
+  practiceQueue: (topicId?: string) => ['practice', 'queue', topicId ?? 'all'] as const,
+  practiceTopics: ['practice', 'topics'] as const,
+  mockExam: (examId: string) => ['practice', 'exam', examId] as const,
 }
 
 // How often to ask for news while an exam is being processed.
@@ -147,4 +151,35 @@ export function useApproveExam() {
       return queryClient.invalidateQueries({ queryKey: keys.exams })
     },
   })
+}
+
+// --- practice ---------------------------------------------------------------
+
+/** What to practise now, best first; only one topic's tasks if `topicId` is given. */
+export function usePracticeQueue(topicId?: string) {
+  return useQuery({
+    queryKey: keys.practiceQueue(topicId),
+    queryFn: () => api.practiceQueue(topicId),
+    // The order depends on the clock (tasks fall due), so never serve it from cache.
+    staleTime: 0,
+    gcTime: 0,
+  })
+}
+
+export function usePracticeTopics() {
+  return useQuery({ queryKey: keys.practiceTopics, queryFn: api.practiceTopics, staleTime: 0 })
+}
+
+/** The tasks of a mock exam. Fetched once: the set must not change under the user. */
+export function useMockExamTasks(examId: string) {
+  return useQuery({
+    queryKey: keys.mockExam(examId),
+    queryFn: () => api.mockExamTasks(examId),
+    staleTime: Infinity,
+  })
+}
+
+/** Logs an attempt. The caller decides when to ask for the queue again. */
+export function useRecordAttempt() {
+  return useMutation({ mutationFn: api.recordAttempt })
 }

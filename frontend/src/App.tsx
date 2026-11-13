@@ -4,6 +4,14 @@ import { Button, ErrorMessage, Loading, PageTitle } from './components/ui.tsx'
 import { ExamDetailPage } from './pages/ExamDetailPage.tsx'
 import { ExamsPage } from './pages/ExamsPage.tsx'
 import { LoginPage } from './pages/LoginPage.tsx'
+import { MockExamPage } from './pages/MockExamPage.tsx'
+import {
+  MockExamList,
+  PracticePage,
+  PractiseNow,
+  TopicList,
+  TopicSession,
+} from './pages/PracticePage.tsx'
 import { SubjectsPage } from './pages/SubjectsPage.tsx'
 import { useSession } from './queries.ts'
 
@@ -24,7 +32,14 @@ export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route index element={<Navigate to="/exams" replace />} />
+        <Route index element={<Navigate to="/practice" replace />} />
+        <Route path="practice" element={<PracticePage />}>
+          <Route index element={<PractiseNow />} />
+          <Route path="topics" element={<TopicList />} />
+          <Route path="topics/:topicId" element={<TopicSession />} />
+          <Route path="mock" element={<MockExamList />} />
+          <Route path="mock/:examId" element={<MockExamPage />} />
+        </Route>
         <Route path="exams" element={<ExamsPage />} />
         <Route path="exams/:examId" element={<ExamDetailPage />} />
         <Route path="subjects" element={<SubjectsPage />} />
@@ -38,8 +53,8 @@ function NotFound() {
   return (
     <>
       <PageTitle>Page not found</PageTitle>
-      <Link to="/exams" className="text-indigo-600 hover:underline">
-        Go to exams
+      <Link to="/practice" className="text-indigo-600 hover:underline">
+        Go to practice
       </Link>
     </>
   )
